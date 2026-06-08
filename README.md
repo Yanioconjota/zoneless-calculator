@@ -2,6 +2,45 @@
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.0.0.
 
+## Key Concepts
+
+### Zoneless Components
+
+**Technical definition:** Zoneless components are Angular components that operate without Zone.js, a library traditionally used to automatically detect changes in the application. Instead, they rely on Angular's new signal-based reactivity system to explicitly notify the framework when the UI needs to update.
+
+**Analogy for non-devs:** Imagine a restaurant kitchen with two different management styles:
+
+- **Traditional (with Zone.js):** A manager constantly watches every single action in the kitchen — every time someone opens a fridge, chops a vegetable, or moves a pan. After any action, the manager checks if any dish needs to be sent out. This works, but the manager is exhausted from watching everything, even irrelevant actions.
+
+- **Zoneless (with Signals):** Instead of a hovering manager, each chef has a bell. When their dish is ready, they ring the bell to notify the waiter. The kitchen only reacts when there's actually something new to serve. Less overhead, more efficient.
+
+Zoneless applications are faster and more predictable because updates happen only when explicitly triggered, not after every possible action.
+
+### Content Projection
+
+**Technical definition:** Content projection (also known as transclusion) is a pattern where a parent component can insert custom content into designated slots (`<ng-content>`) inside a child component's template. This allows creating flexible, reusable wrapper components.
+
+**Analogy for non-devs:** Think of content projection like a picture frame:
+
+- The **frame** (child component) defines the structure, border, and style
+- The **photo** (projected content) is whatever you choose to put inside
+- The frame doesn't care if you insert a family photo, a painting, or a concert ticket — it just provides the container
+
+Another analogy: A shipping box. The box manufacturer creates the box with a specific shape and material, but they don't decide what goes inside. You (the parent) choose what to pack. The box (child component) just provides the container with `<ng-content>` being the "open space" where your items go.
+
+```html
+<!-- Parent template -->
+<app-card>
+  <h2>My Custom Title</h2>
+  <p>Any content I want here!</p>
+</app-card>
+
+<!-- Card component template -->
+<div class="card-wrapper">
+  <ng-content></ng-content>  <!-- The "open space" for your content -->
+</div>
+```
+
 ## Development server
 
 To start a local development server, run:
