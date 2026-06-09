@@ -41,6 +41,51 @@ Another analogy: A shipping box. The box manufacturer creates the box with a spe
 </div>
 ```
 
+### Path Aliases
+
+**Technical definition:** Path aliases are shortcuts defined in `tsconfig.json` that map a custom prefix to a specific directory. This allows importing modules using clean, absolute-style paths instead of long relative paths.
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/app/*"]
+    }
+  }
+}
+```
+
+**The problem it solves:**
+
+Without aliases, imports in deeply nested files become hard to read and maintain:
+
+```typescript
+// Without aliases - fragile and ugly
+import { CalculatorService } from '../../../shared/services/calculator.service';
+import { ButtonComponent } from '../../../../components/button/button.component';
+```
+
+With aliases, every import is clean and consistent regardless of file location:
+
+```typescript
+// With aliases - clean and stable
+import { CalculatorService } from '@/shared/services/calculator.service';
+import { ButtonComponent } from '@/components/button/button.component';
+```
+
+**Analogy for non-devs:** Imagine giving directions to your house:
+
+- **Without aliases (relative paths):** "From wherever you are, go back 3 blocks, turn left, go forward 2 blocks, turn right, then it's the 4th house." The directions change depending on where the person starts.
+
+- **With aliases (absolute paths):** "My address is 123 Main Street." No matter where you are in the city, this address always points to the same place.
+
+**Benefits:**
+
+1. **Readability:** Imports are shorter and self-documenting
+2. **Refactoring safety:** Moving a file doesn't break its imports (only files that import it need updating)
+3. **Consistency:** All developers use the same import style
+4. **IDE support:** Autocompletion works better with predictable paths
+
 ## Development server
 
 To start a local development server, run:
