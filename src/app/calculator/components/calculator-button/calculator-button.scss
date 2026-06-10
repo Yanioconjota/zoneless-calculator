@@ -1,0 +1,9 @@
+@reference "tailwindcss";
+
+button {
+  @apply w-full h-16 outline-none focus:outline-none hover:bg-indigo-400/20 text-white text-xl font-light;
+}
+
+.is-command {
+  @apply bg-indigo-700/10 hover:bg-indigo-700/20;
+}

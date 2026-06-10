@@ -86,6 +86,131 @@ import { ButtonComponent } from '@/components/button/button.component';
 3. **Consistency:** All developers use the same import style
 4. **IDE support:** Autocompletion works better with predictable paths
 
+### Host Bindings (`host` vs `@HostBinding`)
+
+Angular provides two ways to bind classes, attributes, or events to the **host element** (the custom HTML tag that represents the component, e.g. `<calculator-button>`).
+
+#### Legacy approach: `@HostBinding` decorator
+
+```typescript
+import { Component, HostBinding } from '@angular/core';
+
+@Component({ selector: 'calculator-button', ... })
+export class CalculatorButton {
+  @HostBinding('class.is-command') get commandStyle() {
+    return this.isCommand();
+  }
+}
+```
+
+`@HostBinding` maps a class getter to a host property. It works, but it is a **legacy API** discouraged in Angular 17+ for standalone components.
+
+#### Modern approach: `host` in the `@Component` decorator
+
+The preferred Angular 17+ approach declares all host bindings directly in the decorator:
+
+```typescript
+@Component({
+  selector: 'calculator-button',
+  host: {
+    class: 'border-r border-b border-indigo-400',   // static classes
+    '[class.is-command]': 'isCommand()',              // dynamic class binding
+    '[class.w-2/4]': 'isDoubleSize()',               // dynamic class binding
+  },
+})
+export class CalculatorButton { ... }
+```
+
+The `host` object accepts:
+- **String values** for static attributes/classes: `class: 'foo bar'`
+- **Bracket syntax** for dynamic bindings evaluated as expressions: `'[class.name]': 'signal()'`
+- **Parenthesis syntax** for event listeners: `'(click)': 'handler($event)'`
+
+#### How it is used in this project (`CalculatorButton`)
+
+The component uses a **mixed approach** during a transition phase:
+
+```typescript
+host: {
+  class: 'w-1/4 border-r border-b border-indigo-400',  // static, always applied
+},
+
+// legacy @HostBinding still present (commented out for is-command):
+// @HostBinding('class.is-command') get commandStyle() { return this.isCommand(); }
+
+// active @HostBinding for double size:
+@HostBinding('class.w-2/4') get doubleSizeStyle() {
+  return this.isDoubleSize();
+}
+```
+
+> **Known limitation:** `w-1/4` (static) and `w-2/4` (dynamic via `@HostBinding`) coexist on the host when `isDoubleSize` is true. Tailwind resolves this by whichever class appears last in the generated stylesheet, which can be unpredictable. The recommended fix is to make the width fully dynamic using a `computed()` signal and a single `[class]` binding.
+
+#### Recommended final form (signal-based, no legacy decorators)
+
+```typescript
+import { Component, computed, input } from '@angular/core';
+
+@Component({
+  selector: 'calculator-button',
+  host: {
+    '[class]': 'hostClasses()',
+    '[class.is-command]': 'isCommand()',
+  },
+})
+export class CalculatorButton {
+  isCommand = input(false, { transform: booleanAttribute });
+  isDoubleSize = input(false, { transform: booleanAttribute });
+
+  hostClasses = computed(() =>
+    `border-r border-b border-indigo-400 ${this.isDoubleSize() ? 'w-2/4' : 'w-1/4'}`
+  );
+}
+```
+
+This eliminates the `@HostBinding` import entirely and ensures `w-1/4` and `w-2/4` never coexist.
+
+---
+
+### Workspace Settings (`.vscode/settings.json`)
+
+The `.vscode/settings.json` at the **monorepo root** contains shared editor configuration for all projects in `angular-22-plus`.
+
+#### `angular-schematics.schematicsDefaultOptions`
+
+Configures default options for the [Angular Schematics](https://marketplace.visualstudio.com/items?itemName=cyrilletuzi.angular-schematics) extension when generating Angular artifacts:
+
+```json
+"angular-*": {
+  "externalTemplate": true,
+  "skipStyle": true
+}
+```
+
+- **`externalTemplate: true`** — generates the HTML template as a separate file instead of inline in the component decorator.
+- **`skipStyle: true`** — skips generating an empty style file by default (style files are added manually when needed).
+
+#### `files.associations`
+
+```json
+"files.associations": {
+  "*.css": "tailwindcss",
+  "*.scss": "tailwindcss"
+}
+```
+
+Maps `.css` and `.scss` files to the **Tailwind CSS language mode** in the editor. This is required because Tailwind v4 introduces directives like `@reference`, `@apply`, and `@theme` that the default CSS/SCSS language service does not recognize, producing false-positive "unknown at-rule" warnings.
+
+By associating these file types with the `tailwindcss` language mode (provided by the [Tailwind CSS IntelliSense](https://marketplace.visualstudio.com/items?itemName=bradlc.vscode-tailwindcss) extension), the editor:
+
+1. Understands Tailwind-specific directives (`@reference`, `@apply`, `@layer`, etc.).
+2. Suppresses false lint errors for valid Tailwind syntax.
+3. Enables autocomplete for utility classes inside SCSS component files.
+
+> **Note:** This setting applies to all projects in the monorepo. Each individual project can override it with its own `.vscode/settings.json`.
+
+---
+
 ## Development server
 
 To start a local development server, run:
