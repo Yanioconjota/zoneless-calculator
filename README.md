@@ -38,21 +38,23 @@ Calculadora funcional que sirve como demostración práctica de las APIs moderna
 
 ```
 src/app/
-├── app.config.ts                          ← provideZonelessChangeDetection
+├── app.config.ts                                    ← provideZonelessChangeDetection
 ├── app.routes.ts
 ├── calculator/
 │   ├── components/
-│   │   ├── calculator/                    ← componente principal
-│   │   │   ├── calculator.ts
-│   │   │   └── calculator.html
-│   │   └── calculator-button/            ← botón reutilizable
-│   │       ├── calculator-button.ts
-│   │       ├── calculator-button.html
-│   │       └── calculator-button.scss
+│   │   ├── calculator/                              ← componente principal
+│   │   │   ├── calculator.component.ts
+│   │   │   └── calculator.component.html
+│   │   └── calculator-button/                      ← botón reutilizable
+│   │       ├── calculator-button.component.ts
+│   │       ├── calculator-button.component.html
+│   │       └── calculator-button.component.scss
 │   ├── services/
-│   │   └── calculator-service.ts         ← lógica y estado (Signals)
+│   │   └── calculator-service.ts                   ← lógica y estado (Signals)
 │   └── views/
 │       └── calculator-view/
+│           ├── calculator-view.component.ts
+│           └── calculator-view.component.html
 ```
 
 ---

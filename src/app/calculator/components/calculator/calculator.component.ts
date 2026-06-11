@@ -1,18 +1,18 @@
 import { Component, computed, inject, viewChildren } from '@angular/core';
-import { CalculatorButton } from '../calculator-button/calculator-button';
+import { CalculatorButtonComponent } from '../calculator-button/calculator-button.component';
 import { CalculatorService } from '@/calculator/services/calculator-service';
 
 @Component({
   selector: 'calculator',
-  imports: [CalculatorButton],
-  templateUrl: './calculator.html',
+  imports: [CalculatorButtonComponent],
+  templateUrl: './calculator.component.html',
   host: {
     '(document:keyup)': 'handleKeyboardEvent($event)',
   },
 })
-export class Calculator {
+export class CalculatorComponent {
   private calculatorService = inject(CalculatorService);
-  calculatorButtons = viewChildren(CalculatorButton);
+  calculatorButtons = viewChildren(CalculatorButtonComponent);
   resultText = computed(() => this.calculatorService.resultText());
   subResultText = computed(() => this.calculatorService.subResultText());
   lastOperator = computed(() => this.calculatorService.lastOperator());

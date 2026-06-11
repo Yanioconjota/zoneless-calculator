@@ -160,7 +160,8 @@ Un **servicio** en Angular es una clase que encapsula lógica de negocio y estad
 // src/app/calculator/services/calculator-service.ts
 import { Service, signal } from '@angular/core';
 
-@Service() // singleton global, no necesita providedIn: 'root'
+@Service()
+
 export class CalculatorService {
   public resultText    = signal('0');
   public subResultText = signal('0');
@@ -174,8 +175,8 @@ export class CalculatorService {
 ### Inyección con `inject()`
 
 ```typescript
-// src/app/calculator/components/calculator/calculator.ts
-export class Calculator {
+// src/app/calculator/components/calculator/calculator.component.ts
+export class CalculatorComponent {
   private calculatorService = inject(CalculatorService); // sin constructor
 }
 ```
@@ -232,8 +233,8 @@ console.log(total()); // 450 — recalculado automáticamente
 El componente `Calculator` no lee el servicio directamente: expone signals derivadas.
 
 ```typescript
-// src/app/calculator/components/calculator/calculator.ts
-export class Calculator {
+// src/app/calculator/components/calculator/calculator.component.ts
+export class CalculatorComponent {
   private calculatorService = inject(CalculatorService);
 
   // signals derivadas del servicio — se actualizan automáticamente
@@ -309,7 +310,7 @@ DOM resultante:
 ### Ejemplo del proyecto — ancho condicional
 
 ```typescript
-// src/app/calculator/components/calculator-button/calculator-button.ts
+// src/app/calculator/components/calculator-button/calculator-button.component.ts
 @Component({
   host: {
     class: 'border-r border-b border-indigo-400', // siempre presente
@@ -317,7 +318,7 @@ DOM resultante:
     '[class.w-1/4]': '!isDoubleSize()',            // ancho simple si es false
   },
 })
-export class CalculatorButton {
+export class CalculatorButtonComponent {
   isDoubleSize = input(false, { transform: ... });
 }
 ```
@@ -335,13 +336,13 @@ En el template padre:
 ### Ejemplo del proyecto — evento en el host
 
 ```typescript
-// src/app/calculator/components/calculator/calculator.ts
+// src/app/calculator/components/calculator/calculator.component.ts
 @Component({
   host: {
     '(document:keyup)': 'handleKeyboardEvent($event)', // escucha teclado global
   },
 })
-export class Calculator {
+export class CalculatorComponent {
   handleKeyboardEvent(event: KeyboardEvent) { ... }
 }
 ```
@@ -365,7 +366,7 @@ El host es como la **fachada de un edificio**: el `host` controla el color, tama
 ```typescript
 import { HostBinding } from '@angular/core';
 
-export class CalculatorButton {
+export class CalculatorButtonComponent {
   @HostBinding('class.is-command')
   get commandStyle() {
     return this.isCommand(); // getter evaluado en cada CD
@@ -388,7 +389,7 @@ export class CalculatorButton {
     '[class.w-1/4]':      '!isDoubleSize()',
   },
 })
-export class CalculatorButton { }
+export class CalculatorButtonComponent { }
 ```
 
 **Antes — `@HostListener` (legacy):**
@@ -396,7 +397,7 @@ export class CalculatorButton { }
 ```typescript
 import { HostListener } from '@angular/core';
 
-export class Calculator {
+export class CalculatorComponent {
   @HostListener('document:keyup', ['$event'])
   handleKeyboardEvent(event: KeyboardEvent) { ... }
 }
@@ -410,7 +411,7 @@ export class Calculator {
     '(document:keyup)': 'handleKeyboardEvent($event)',
   },
 })
-export class Calculator {
+export class CalculatorComponent {
   handleKeyboardEvent(event: KeyboardEvent) { ... }
 }
 ```
@@ -420,7 +421,7 @@ export class Calculator {
 Los `@HostBinding` están comentados como referencia del proceso de migración:
 
 ```typescript
-// calculator-button.ts — comentarios conservados intencionalmente
+// calculator-button.component.ts — comentarios conservados intencionalmente
 /*
 @HostBinding('class.is-command') get commandStyle() {
   return this.isCommand();
@@ -458,7 +459,7 @@ Los `@HostBinding` están comentados como referencia del proceso de migración:
 ```typescript
 import { Output, EventEmitter } from '@angular/core';
 
-export class CalculatorButton {
+export class CalculatorButtonComponent {
   @Output() onClick = new EventEmitter<string>();
 
   handleClick() {
@@ -472,7 +473,7 @@ export class CalculatorButton {
 ```typescript
 import { output } from '@angular/core';
 
-export class CalculatorButton {
+export class CalculatorButtonComponent {
   onClick = output<string>(); // tipado, sin new EventEmitter
 
   handleClick() {
@@ -484,8 +485,8 @@ export class CalculatorButton {
 ### Ejemplo del proyecto
 
 ```typescript
-// src/app/calculator/components/calculator-button/calculator-button.ts
-export class CalculatorButton {
+// src/app/calculator/components/calculator-button/calculator-button.component.ts
+export class CalculatorButtonComponent {
   onClick = output<string>(); // emite el texto del botón presionado
 
   handleClick() {
@@ -499,7 +500,7 @@ export class CalculatorButton {
 En el template padre:
 
 ```html
-<!-- src/app/calculator/components/calculator/calculator.html -->
+<!-- src/app/calculator/components/calculator/calculator.component.html -->
 <calculator-button (onClick)="handleClick($event)">7</calculator-button>
 ```
 
@@ -509,13 +510,13 @@ En el template padre:
 Usuario hace clic
        │
        ▼
-  <button> dispara (click) → handleClick() en CalculatorButton
+  <button> dispara (click) → handleClick() en CalculatorButtonComponent
        │
        ▼
   onClick.emit('7')
        │
        ▼
-  (onClick)="handleClick($event)" en Calculator
+  (onClick)="handleClick($event)" en CalculatorComponent
        │
        ▼
   calculatorService.constructNumber('7')
@@ -543,7 +544,7 @@ Usuario hace clic
 ```typescript
 import { ViewChild, ElementRef } from '@angular/core';
 
-export class CalculatorButton {
+export class CalculatorButtonComponent {
   @ViewChild('button') buttonRef!: ElementRef<HTMLButtonElement>;
   // disponible solo después de ngAfterViewInit
 }
@@ -554,7 +555,7 @@ export class CalculatorButton {
 ```typescript
 import { viewChild, ElementRef } from '@angular/core';
 
-export class CalculatorButton {
+export class CalculatorButtonComponent {
   contentValue = viewChild<ElementRef<HTMLButtonElement>>('button');
   // es un signal — disponible reactivamente, sin lifecycle hooks
 }
@@ -563,8 +564,8 @@ export class CalculatorButton {
 ### Ejemplo del proyecto
 
 ```typescript
-// src/app/calculator/components/calculator-button/calculator-button.ts
-export class CalculatorButton {
+// src/app/calculator/components/calculator-button/calculator-button.component.ts
+export class CalculatorButtonComponent {
   contentValue = viewChild<ElementRef<HTMLButtonElement>>('button');
   //                                                       ↑
   //                                          referencia al #button del template
@@ -615,9 +616,9 @@ Template al que apunta:
 ### Ejemplo del proyecto
 
 ```typescript
-// src/app/calculator/components/calculator/calculator.ts
-export class Calculator {
-  calculatorButtons = viewChildren(CalculatorButton);
+// src/app/calculator/components/calculator/calculator.component.ts
+export class CalculatorComponent {
+  calculatorButtons = viewChildren(CalculatorButtonComponent);
   //                              ↑ referencia a TODOS los <calculator-button>
   //                                del template de Calculator
 
@@ -639,11 +640,11 @@ export class Calculator {
   ┌────────────────────────────────────┐
   │  <calculator-button>C</>           │ ─┐
   │  <calculator-button>+/-</>         │  │
-  │  <calculator-button>%</>           │  ├── viewChildren(CalculatorButton)
-  │  <calculator-button>÷</>           │  │   devuelve signal<CalculatorButton[]>
+  │  <calculator-button>%</>           │  ├── viewChildren(CalculatorButtonComponent)
+  │  <calculator-button>÷</>           │  │
   │  ... (17 botones en total)         │ ─┘
-  └────────────────────────────────────┘
-           │
+  └────────────────────────────────────┘       viewChildren(CalculatorButtonComponent)
+           │                                   devuelve signal<CalculatorButtonComponent[]>
            ▼
   calculatorButtons() → [btn1, btn2, btn3, ...btn17]
 ```
@@ -665,7 +666,7 @@ viewChildren()  → signal<readonly T[]>       — todos los del tipo
   Usuario presiona botón/tecla
          │
          ▼
-  Calculator.handleClick(key)
+  CalculatorComponent.handleClick(key)
          │
          ▼
   CalculatorService.constructNumber(key)
@@ -710,7 +711,7 @@ calculateResult() {
 ### Mapeo de teclas del teclado
 
 ```typescript
-// src/app/calculator/components/calculator/calculator.ts
+// src/app/calculator/components/calculator/calculator.component.ts
 const equivalentKey: Record<string, string> = {
   Escape: 'C',   // Escape → limpiar
   Clear:  'C',
@@ -845,7 +846,7 @@ Angular 17+ reemplaza `*ngIf` y `*ngFor` con sintaxis nativa en los templates:
 ### Efectos visuales con Signal + `setTimeout`
 
 ```typescript
-// calculator-button.ts — efecto de tecla presionada
+// calculator-button.component.ts — efecto de tecla presionada
 keyboardPressedStyle(key: string) {
   const value = this.contentValue()?.nativeElement.textContent?.trim();
   if (value !== key) return;

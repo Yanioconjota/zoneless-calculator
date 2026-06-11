@@ -3,15 +3,15 @@ import { Component, ElementRef, input, output, signal, viewChild } from '@angula
 @Component({
   selector: 'calculator-button',
   imports: [],
-  templateUrl: './calculator-button.html',
-  styleUrls: ['./calculator-button.scss'],
+  templateUrl: './calculator-button.component.html',
+  styleUrls: ['./calculator-button.component.scss'],
   host: {
     class: 'border-r border-b border-indigo-400',
     '[class.w-2/4]': 'isDoubleSize()',
     '[class.w-1/4]': '!isDoubleSize()',
   },
 })
-export class CalculatorButton {
+export class CalculatorButtonComponent {
 
   onClick = output<string>();
   contentValue = viewChild<ElementRef<HTMLButtonElement>>('button')
