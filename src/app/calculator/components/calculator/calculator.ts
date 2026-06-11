@@ -25,12 +25,9 @@ export class Calculator {
     const equivalentKey: Record<string, string> = {
       Escape: 'C',
       Clear: 'C',
-      Backspace: 'C',
-      Delete: 'C',
-      Return: '=',
       Enter: '=',
-      '*': 'x',
-      '/': '÷',
+      'x': '*',
+      '÷': '/',
     }
     const keyValue = equivalentKey[key] ?? key;
     this.handleClick(keyValue);

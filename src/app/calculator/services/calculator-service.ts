@@ -117,6 +117,8 @@ export class CalculatorService {
 
     let result = 0;
 
+    console.log(this.lastOperator());
+
     switch (this.lastOperator()) {
       case '+':
         result = number1 + number2;
