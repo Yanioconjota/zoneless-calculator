@@ -1,4 +1,4 @@
-import { Component, ElementRef, HostBinding, input, output, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, input, output, signal, viewChild } from '@angular/core';
 
 @Component({
   selector: 'calculator-button',
