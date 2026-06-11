@@ -4,17 +4,129 @@ This project was generated using [Angular CLI](https://github.com/angular/angula
 
 ## Key Concepts
 
-### Zoneless Components
+### Zone.js vs Zoneless
 
-**Technical definition:** Zoneless components are Angular components that operate without Zone.js, a library traditionally used to automatically detect changes in the application. Instead, they rely on Angular's new signal-based reactivity system to explicitly notify the framework when the UI needs to update.
+#### What is Zone.js?
 
-**Analogy for non-devs:** Imagine a restaurant kitchen with two different management styles:
+Zone.js is a library that **patches every async operation in the browser** (setTimeout, Promise, XHR, event listeners, etc.) so Angular knows when something might have changed and triggers a check of the entire component tree.
 
-- **Traditional (with Zone.js):** A manager constantly watches every single action in the kitchen — every time someone opens a fridge, chops a vegetable, or moves a pan. After any action, the manager checks if any dish needs to be sent out. This works, but the manager is exhausted from watching everything, even irrelevant actions.
+```
+┌─────────────────────────────────────────────────┐
+│                  ZONE.JS MODEL                  │
+│                                                 │
+│  User clicks button                             │
+│       │                                         │
+│       ▼                                         │
+│  Zone.js intercepts the event                   │
+│       │                                         │
+│       ▼                                         │
+│  Angular: "something happened, check everything"│
+│       │                                         │
+│       ▼                                         │
+│  ┌────────────────────────────┐                 │
+│  │   Change Detection (CD)    │                 │
+│  │   Root                     │                 │
+│  │   ├── ComponentA  ← check  │                 │
+│  │   │   ├── ComponentB ← check│                │
+│  │   │   └── ComponentC ← check│                │
+│  │   ├── ComponentD  ← check  │                 │
+│  │   └── ComponentE  ← check  │                 │
+│  └────────────────────────────┘                 │
+│   Even if only ComponentB actually changed!     │
+└─────────────────────────────────────────────────┘
+```
 
-- **Zoneless (with Signals):** Instead of a hovering manager, each chef has a bell. When their dish is ready, they ring the bell to notify the waiter. The kitchen only reacts when there's actually something new to serve. Less overhead, more efficient.
+This works, but it has costs:
+- **Performance:** the entire tree is checked after every async event, even unrelated ones.
+- **Bundle size:** Zone.js adds ~100 KB to the app bundle.
+- **Debugging:** the patching of native APIs makes stack traces harder to read.
+- **Compatibility:** some third-party libraries fight with Zone.js patches.
 
-Zoneless applications are faster and more predictable because updates happen only when explicitly triggered, not after every possible action.
+#### What is Zoneless?
+
+A Zoneless Angular app **removes Zone.js entirely**. Components only update when a **Signal** explicitly notifies Angular that a value changed — no global patching, no tree-wide checks.
+
+```
+┌─────────────────────────────────────────────────┐
+│                 ZONELESS MODEL                  │
+│                                                 │
+│  signal.set(newValue)                           │
+│       │                                         │
+│       ▼                                         │
+│  Angular: "signal changed, notify consumers"   │
+│       │                                         │
+│       ▼                                         │
+│  ┌────────────────────────────┐                 │
+│  │   Targeted re-render       │                 │
+│  │   Root                     │                 │
+│  │   ├── ComponentA  ← skip   │                 │
+│  │   │   ├── ComponentB ← ✔  │                 │
+│  │   │   └── ComponentC ← skip│                │
+│  │   ├── ComponentD  ← skip   │                 │
+│  │   └── ComponentE  ← skip   │                 │
+│  └────────────────────────────┘                 │
+│   Only ComponentB subscribed to that signal!    │
+└─────────────────────────────────────────────────┘
+```
+
+#### Side-by-side comparison
+
+```
+┌──────────────────────┬────────────────────────────────────┐
+│      Zone.js         │           Zoneless (Signals)        │
+├──────────────────────┼────────────────────────────────────┤
+│ Patches async APIs   │ No patching — native APIs untouched │
+│ Checks entire tree   │ Updates only affected components    │
+│ ~100 KB extra bundle │ Zero overhead from Zone             │
+│ Implicit (magic)     │ Explicit (you control updates)      │
+│ Easier to migrate    │ Requires Signals adoption           │
+│ Angular 2–18 default │ Default in Angular 18+ (opt-in)     │
+└──────────────────────┴────────────────────────────────────┘
+```
+
+#### How Angular knows what to update (Signals)
+
+```
+  const count = signal(0);          // declare reactive value
+        │
+        │   count.set(1)            // write
+        │       │
+        │       ▼
+        │   Angular graph tracks
+        │   which templates read count()
+        │       │
+        │       ▼
+        └── Only those templates re-render
+```
+
+#### Analogy
+
+Imagine a **smart home** with motion sensors:
+
+- **Zone.js (old approach):** Every time *any* door in the house opens, every single light in every room flickers briefly to check if it should be on. Works, but noisy and wasteful.
+
+- **Zoneless (Signals):** Each light is connected only to the sensor in its own room. When the bedroom sensor triggers, only the bedroom light reacts. The rest of the house does nothing.
+
+#### Enabling Zoneless in Angular 18+
+
+```typescript
+// app.config.ts
+import { provideExperimentalZonelessChangeDetection } from '@angular/core';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideExperimentalZonelessChangeDetection(),
+  ],
+};
+```
+
+And remove `zone.js` from `polyfills` in `angular.json`:
+
+```json
+"polyfills": []
+```
+
+> In this project, zoneless is enabled from the start. All state is managed through Signals, and no Zone.js dependency is included in the bundle.
 
 ### Content Projection
 
