@@ -34,7 +34,7 @@
     <calculator-button (onClick)="handleClick($event)">1</calculator-button>
     <calculator-button (onClick)="handleClick($event)">2</calculator-button>
     <calculator-button (onClick)="handleClick($event)">3</calculator-button>
-    <calculator-button isCommand="">+</calculator-button>
+    <calculator-button (onClick)="handleClick($event)" isCommand>+</calculator-button>
   </div>
   <div class="flex w-full">
     <calculator-button (onClick)="handleClick($event)">0</calculator-button>

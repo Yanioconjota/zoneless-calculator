@@ -129,6 +129,7 @@ export class CalculatorService {
       case '*':
         result = number1 * number2;
         break;
+      case 'x':
       case 'X':
         result = number1 * number2;
         break;
