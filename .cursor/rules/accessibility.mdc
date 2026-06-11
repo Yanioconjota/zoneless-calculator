@@ -1,0 +1,338 @@
+---
+description: Accessibility patterns for WCAG compliance - ARIA, keyboard navigation, screen readers, focus management
+globs: ["**/*.component.html", "**/*.component.ts", "**/*.html"]
+alwaysApply: true
+---
+
+# Accessibility Patterns
+
+Build interfaces that work for everyone - keyboard users, screen reader users, and users with various disabilities.
+
+## Default Behavior
+
+### Use Semantic HTML First
+
+Native HTML elements have built-in accessibility. Only add ARIA when semantic HTML isn't sufficient.
+
+```html
+<!-- ✅ Default: Semantic HTML -->
+<button type="button" (click)="onSave()">Save</button>
+<nav aria-label="Main navigation">...</nav>
+<main>...</main>
+<article>...</article>
+
+<!-- ❌ Avoid: Divs with ARIA roles when semantic exists -->
+<div role="button" (click)="onSave()">Save</div>
+```
+
+### Label All Interactive Elements
+
+Every interactive element must have an accessible name.
+
+```html
+<!-- ✅ Default: Visible label -->
+<label for="email">Email</label>
+<input id="email" type="email" />
+
+<!-- ✅ Default: aria-label for icon-only buttons -->
+<button type="button" aria-label="Delete item" (click)="onDelete()">
+  <svg aria-hidden="true"><!-- icon --></svg>
+</button>
+
+<!-- ✅ Default: sr-only for visually hidden labels -->
+<label for="search" class="sr-only">Search users</label>
+<input id="search" type="search" placeholder="Search..." />
+```
+
+### Announce Dynamic Content
+
+Use `aria-live` regions for content that updates without page reload.
+
+```html
+<!-- ✅ Default: Polite announcements for non-urgent updates -->
+<div aria-live="polite">
+  Showing {{ count() }} of {{ total() }} results
+</div>
+
+<!-- ✅ Default: Assertive for errors -->
+<div role="alert" aria-live="assertive">
+  @if (error()) {
+    {{ error() }}
+  }
+</div>
+```
+
+### Support Keyboard Navigation
+
+Interactive elements must be keyboard accessible.
+
+```html
+<!-- ✅ Default: Keyboard support on clickable elements -->
+<article 
+  class="card"
+  tabindex="0"
+  role="button"
+  [attr.aria-pressed]="selected()"
+  (click)="onSelect()"
+  (keydown.enter)="onSelect()"
+  (keydown.space)="onSelect()"
+>
+  ...
+</article>
+```
+
+### Visible Focus Indicators
+
+Never remove focus without replacement.
+
+```scss
+// ✅ Default: Clear focus indicators
+:focus-visible {
+  outline: 2px solid var(--focus-color, #005fcc);
+  outline-offset: 2px;
+}
+
+// ✅ Custom focus for specific elements
+.btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  box-shadow: 0 0 0 4px rgba(0, 95, 204, 0.2);
+}
+```
+
+## Rationale
+
+1. **Legal compliance** - WCAG 2.1 AA is required in many jurisdictions.
+2. **Broader reach** - ~15% of users have some form of disability.
+3. **Better UX for all** - Keyboard shortcuts, clear focus states, and structured content benefit everyone.
+
+## Documented Exceptions
+
+### 1. Decorative Images Skip Alt Text
+
+Images that are purely decorative should be hidden from screen readers.
+
+```html
+<!-- ✅ Exception: Decorative image -->
+<img src="decorative-wave.svg" alt="" aria-hidden="true" />
+
+<!-- ✅ Exception: Icon alongside text -->
+<button>
+  <svg aria-hidden="true"><!-- icon --></svg>
+  Save Changes
+</button>
+```
+
+### 2. Skip aria-live for User-Initiated Actions
+
+Don't announce changes the user directly caused through their action.
+
+```html
+<!-- ❌ Unnecessary: User clicked delete, they know it was deleted -->
+<div aria-live="polite">Item deleted</div>
+
+<!-- ✅ Exception: Only announce unexpected or async results -->
+<div aria-live="polite">
+  @if (searchResults().length === 0) {
+    No results found for "{{ searchTerm() }}"
+  }
+</div>
+```
+
+### 3. Complex Widgets May Require Custom Keyboard Patterns
+
+Standard ARIA patterns for menus, dialogs, and trees have specific keyboard expectations.
+
+```typescript
+// ✅ Exception: Custom keyboard handling for dropdown menu
+@HostListener('keydown', ['$event'])
+onKeydown(event: KeyboardEvent) {
+  switch (event.key) {
+    case 'ArrowDown':
+      this.focusNextItem();
+      event.preventDefault();
+      break;
+    case 'ArrowUp':
+      this.focusPreviousItem();
+      event.preventDefault();
+      break;
+    case 'Escape':
+      this.close();
+      break;
+  }
+}
+```
+
+## Anti-Patterns
+
+```html
+<!-- ❌ No label -->
+<input type="text" placeholder="Enter name" />
+
+<!-- ❌ Placeholder as label (disappears on input) -->
+<input type="email" placeholder="Email" />
+
+<!-- ❌ Click handler on non-interactive element without keyboard -->
+<div (click)="doSomething()">Click me</div>
+
+<!-- ❌ Removing focus outline without replacement -->
+button:focus { outline: none; }
+
+<!-- ❌ aria-live on everything -->
+<div aria-live="polite">
+  <ul>
+    @for (item of items(); track item.id) {
+      <li>{{ item.name }}</li>  <!-- Announces EVERY item change -->
+    }
+  </ul>
+</div>
+
+<!-- ❌ Generic link text -->
+<a href="/more">Click here</a>
+<a href="/docs">Read more</a>
+```
+
+## Screen Reader Only Utility
+
+Include in global styles:
+
+```scss
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+// Allow element to be focusable (for skip links)
+.sr-only-focusable:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+```
+
+## Complete Form Field Pattern
+
+```html
+<div class="form-field">
+  <label for="email">
+    Email
+    <span aria-hidden="true" class="required">*</span>
+  </label>
+  <input
+    id="email"
+    type="email"
+    formControlName="email"
+    [attr.aria-invalid]="isInvalid('email')"
+    [attr.aria-describedby]="getDescribedBy('email')"
+    autocomplete="email"
+  />
+  <span id="email-hint" class="hint">
+    We'll never share your email
+  </span>
+  @if (isInvalid('email')) {
+    <span id="email-error" class="error" role="alert">
+      Please enter a valid email address
+    </span>
+  }
+</div>
+```
+
+```typescript
+getDescribedBy(field: string): string {
+  const parts = [`${field}-hint`];
+  if (this.isInvalid(field)) {
+    parts.push(`${field}-error`);
+  }
+  return parts.join(' ');
+}
+```
+
+## Modal Focus Management
+
+```typescript
+// ✅ Default: Focus first element when modal opens
+ngOnInit() {
+  this.previousFocus = document.activeElement as HTMLElement;
+  this.focusFirstElement();
+}
+
+// ✅ Default: Restore focus when modal closes
+ngOnDestroy() {
+  this.previousFocus?.focus();
+}
+```
+
+## Loading States
+
+```html
+<!-- ✅ Accessible loading indicator -->
+<div [attr.aria-busy]="isLoading()">
+  @if (isLoading()) {
+    <div class="spinner" aria-hidden="true"></div>
+    <span class="sr-only">Loading content, please wait...</span>
+  } @else {
+    <!-- Content -->
+  }
+</div>
+```
+
+## Motion and Animation
+
+```scss
+// ✅ Respect user preferences
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+```
+
+## Color & Contrast
+
+Minimum contrast ratios (WCAG AA):
+- Normal text: 4.5:1
+- Large text (18pt+): 3:1
+- UI components: 3:1
+
+## ARIA Quick Reference
+
+| Attribute | Use For |
+|-----------|---------|
+| `aria-label` | Labels when no visible text |
+| `aria-labelledby` | Points to visible label element |
+| `aria-describedby` | Additional context (hints, errors) |
+| `aria-invalid="true"` | Field has validation error |
+| `aria-live="polite"` | Dynamic content updates |
+| `aria-live="assertive"` | Urgent updates (errors) |
+| `aria-busy="true"` | Content is loading |
+| `aria-pressed="true"` | Toggle button state |
+| `aria-expanded="true"` | Expandable content state |
+| `aria-hidden="true"` | Hide from screen readers |
+| `role="alert"` | Important messages |
+| `role="status"` | Status updates |
+
+## Testing Checklist
+
+- [ ] Keyboard navigation works for all interactive elements
+- [ ] Focus order is logical
+- [ ] Focus is visible on all interactive elements
+- [ ] All images have alt text (or aria-hidden if decorative)
+- [ ] Form fields have associated labels
+- [ ] Error messages are announced
+- [ ] Color is not the only way to convey information
+- [ ] Text can be resized to 200% without loss of content
+- [ ] Page works with screen reader (NVDA, VoiceOver)

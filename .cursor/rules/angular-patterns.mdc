@@ -1,0 +1,513 @@
+---
+description: Angular 22 patterns and conventions - standalone components, signals, control flow, dependency injection
+globs: ["**/*.ts", "**/*.html"]
+alwaysApply: true
+---
+
+# Angular 22 Patterns & Conventions
+
+Modern Angular patterns using standalone components, signals, and the new control flow syntax.
+
+## Default Behavior
+
+### Standalone Components (Default since Angular 20)
+
+All components are standalone by default. Do NOT use NgModules for components.
+
+> **Migration Note (Angular 20+):** The `standalone: true` property is now the default and should be omitted from component decorators. Only specify `standalone: false` if you explicitly need NgModule-based components (rare).
+
+```typescript
+// ✅ Default: Standalone component (Angular 22)
+@Component({
+  selector: 'app-feature-name',
+  // standalone: true is implicit - DO NOT specify
+  imports: [CommonModule, ReactiveFormsModule],
+  templateUrl: './feature-name.component.html',
+  styleUrl: './feature-name.component.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class FeatureNameComponent {}
+
+// ❌ Avoid: Explicitly setting standalone: true (redundant in Angular 20+)
+@Component({
+  selector: 'app-feature-name',
+  standalone: true,  // Unnecessary - this is the default
+  // ...
+})
+```
+
+### Dependency Injection with inject()
+
+Use `inject()` function instead of constructor injection.
+
+```typescript
+// ✅ Default: inject() function
+export class MyComponent {
+  private readonly http = inject(HttpClient);
+  private readonly store = inject(FeatureStore);
+  private readonly router = inject(Router);
+}
+
+// ❌ Avoid: Constructor injection
+export class MyComponent {
+  constructor(
+    private http: HttpClient,
+    private store: FeatureStore
+  ) {}
+}
+```
+
+### Host Bindings with `host` Object (Angular 20+)
+
+Use the `host` object in component/directive decorators instead of `@HostBinding` and `@HostListener` decorators.
+
+```typescript
+// ✅ Default: host object (Angular 20+)
+@Component({
+  selector: 'app-expandable-panel',
+  host: {
+    '[class.expanded]': 'isExpanded()',
+    '[class.collapsed]': '!isExpanded()',
+    '[attr.aria-expanded]': 'isExpanded()',
+    '(click)': 'toggle()',
+    '(keydown.enter)': 'toggle()',
+    '(keydown.space)': 'toggle()'
+  }
+})
+export class ExpandablePanelComponent {
+  isExpanded = signal(false);
+  
+  toggle() {
+    this.isExpanded.update(v => !v);
+  }
+}
+
+// ❌ Avoid: @HostBinding and @HostListener decorators
+@Component({
+  selector: 'app-expandable-panel'
+})
+export class ExpandablePanelComponent {
+  @HostBinding('class.expanded') isExpanded = false;
+  @HostListener('click') onClick() { this.toggle(); }
+}
+```
+
+### Class and Style Bindings (Preferred over ngClass/ngStyle)
+
+Use native `[class.*]` and `[style.*]` bindings instead of `ngClass` and `ngStyle` directives.
+
+```html
+<!-- ✅ Default: Native class bindings -->
+<div [class.active]="isActive()">
+<div [class.highlight]="shouldHighlight()" [class.disabled]="isDisabled()">
+
+<!-- ✅ Default: Native style bindings -->
+<div [style.color]="textColor()">
+<div [style.width.px]="widthInPixels()" [style.opacity]="opacity()">
+
+<!-- ❌ Avoid: ngClass directive -->
+<div [ngClass]="{'active': isActive(), 'highlight': shouldHighlight()}">
+
+<!-- ❌ Avoid: ngStyle directive -->
+<div [ngStyle]="{'color': textColor, 'width.px': widthInPixels}">
+```
+
+**Rationale:**
+- Native bindings are more performant (no directive overhead)
+- Better type checking with signals
+- Clearer intent in templates
+- Better tree-shaking (no need to import CommonModule just for ngClass)
+
+### SSR Compatibility (No Browser Globals)
+
+Do NOT assume browser globals like `window`, `document`, `localStorage`, or `new Date()` are available. Angular applications may run in SSR (Server-Side Rendering) or other non-browser environments.
+
+```typescript
+// ❌ Avoid: Direct access to browser globals
+export class BadComponent {
+  constructor() {
+    const width = window.innerWidth;  // Breaks in SSR
+    const stored = localStorage.getItem('key');  // Breaks in SSR
+    const now = new Date();  // May differ between server/client
+  }
+}
+
+// ✅ Default: Use injection tokens and platform checks
+import { DOCUMENT, isPlatformBrowser } from '@angular/common';
+import { PLATFORM_ID, inject } from '@angular/core';
+
+export class GoodComponent {
+  private readonly document = inject(DOCUMENT);
+  private readonly platformId = inject(PLATFORM_ID);
+  
+  ngOnInit() {
+    if (isPlatformBrowser(this.platformId)) {
+      const width = this.document.defaultView?.innerWidth;
+      const stored = this.document.defaultView?.localStorage.getItem('key');
+    }
+  }
+}
+
+// ✅ For localStorage: Create an injectable service
+@Injectable({ providedIn: 'root' })
+export class StorageService {
+  private readonly platformId = inject(PLATFORM_ID);
+  
+  getItem(key: string): string | null {
+    if (isPlatformBrowser(this.platformId)) {
+      return localStorage.getItem(key);
+    }
+    return null;
+  }
+}
+```
+
+### Signal-Based Inputs
+
+Use signal inputs instead of `@Input()` decorator.
+
+```typescript
+// ✅ Default: Signal inputs
+export class CardComponent {
+  data = input.required<CardData>();          // Required
+  variant = input<'default' | 'outlined'>('default');  // Optional with default
+  subtitle = input<string>();                 // Optional, undefined if not provided
+}
+
+// ❌ Avoid: Legacy decorators
+export class CardComponent {
+  @Input() data!: CardData;
+  @Input() variant: 'default' | 'outlined' = 'default';
+}
+```
+
+### Signal-Based Outputs
+
+Use `output()` instead of `@Output()` decorator.
+
+```typescript
+// ✅ Default: Signal outputs
+export class FormComponent {
+  submitted = output<FormData>();
+  cancelled = output<void>();
+  
+  onSubmit(data: FormData) {
+    this.submitted.emit(data);
+  }
+}
+
+// ❌ Avoid: Legacy decorators
+export class FormComponent {
+  @Output() submitted = new EventEmitter<FormData>();
+}
+```
+
+### Two-Way Binding with model()
+
+Use `model()` for two-way binding scenarios.
+
+```typescript
+// ✅ Default: model() for two-way binding
+export class SearchInputComponent {
+  value = model('');
+}
+// Parent usage: <app-search-input [(value)]="searchTerm" />
+```
+
+### Control Flow Syntax
+
+Use built-in control flow instead of structural directives.
+
+```html
+<!-- ✅ Default: Built-in control flow -->
+@if (isLoading()) {
+  <app-skeleton-loader />
+} @else if (hasError()) {
+  <app-error-state [error]="error()" (retry)="onRetry()" />
+} @else {
+  <app-content [data]="data()" />
+}
+
+@for (item of items(); track item.id) {
+  <app-list-item [item]="item" (selected)="onSelect($event)" />
+} @empty {
+  <app-empty-state message="No items found" />
+}
+
+@switch (status()) {
+  @case ('loading') { <app-loader /> }
+  @case ('success') { <app-success-view /> }
+  @case ('error') { <app-error-view /> }
+  @default { <app-initial-state /> }
+}
+```
+
+### Computed Values
+
+Use `computed()` for derived state.
+
+```typescript
+// ✅ Default: Derived state with computed()
+export class ProductListComponent {
+  private readonly store = inject(ProductStore);
+  
+  totalPrice = computed(() => 
+    this.store.items().reduce((sum, item) => sum + item.price, 0)
+  );
+  
+  hasItems = computed(() => this.store.items().length > 0);
+}
+```
+
+### Subscription Cleanup
+
+Use `takeUntilDestroyed()` for automatic cleanup.
+
+```typescript
+// ✅ Default: Automatic cleanup
+export class DataComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  
+  ngOnInit() {
+    this.dataService.getUpdates().pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(data => this.handleUpdate(data));
+  }
+}
+```
+
+## Rationale
+
+1. **Simplified mental model** - No NgModules to manage
+2. **Better tree-shaking** - Standalone components enable finer-grained bundling
+3. **Type safety** - Signal inputs provide better type inference
+4. **Performance** - OnPush + signals enable efficient change detection
+5. **Cleaner templates** - Control flow is more readable than *ngIf/*ngFor
+
+## Documented Exceptions
+
+### 1. Constructor Injection for Token-Based DI
+
+When using injection tokens that require specific options.
+
+```typescript
+// ✅ Exception: Token with options
+export class FeatureComponent {
+  private readonly config = inject(APP_CONFIG, { optional: true });
+  
+  constructor() {
+    // Can still use constructor for initialization logic
+    if (!this.config) {
+      console.warn('No config provided, using defaults');
+    }
+  }
+}
+```
+
+### 2. Effects for Side Effects
+
+Use `effect()` sparingly for side effects that must react to signal changes.
+
+```typescript
+// ✅ Exception: Side effects with effect()
+export class DataTableComponent {
+  private readonly store = inject(TableStore);
+  private readonly router = inject(Router);
+  
+  constructor() {
+    // Sync with URL params
+    effect(() => {
+      const page = this.store.currentPage();
+      this.router.navigate([], { queryParams: { page } });
+    });
+  }
+}
+```
+
+**Use sparingly:** Prefer computed() for derived values; effect() is for external side effects only.
+
+### 3. Legacy Library Integration
+
+When integrating with libraries that expect EventEmitter or require decorator-based inputs.
+
+```typescript
+// ✅ Exception: Third-party library compatibility
+@Component({...})
+export class LegacyWrapperComponent {
+  @Input() set legacyData(value: Data) {
+    this.internalData.set(value);
+  }
+  
+  private internalData = signal<Data | null>(null);
+}
+```
+
+## Anti-Patterns
+
+```typescript
+// ❌ Using NgModules for components
+@NgModule({
+  declarations: [FeatureComponent],
+  imports: [CommonModule]
+})
+export class FeatureModule {}
+
+// ❌ Explicitly setting standalone: true (redundant in Angular 20+)
+@Component({
+  standalone: true,  // This is the default - omit it
+  // ...
+})
+
+// ❌ Mixed injection patterns in same component
+export class BadComponent {
+  private readonly http = inject(HttpClient);
+  
+  constructor(private store: FeatureStore) {}  // Mixing styles
+}
+
+// ❌ Using @HostBinding/@HostListener decorators
+@Component({...})
+export class BadComponent {
+  @HostBinding('class.active') isActive = false;
+  @HostListener('click') onClick() {}
+}
+// ✅ Instead: Use host object in decorator
+
+// ❌ Using ngClass/ngStyle
+<div [ngClass]="{'active': isActive}">
+<div [ngStyle]="{'color': textColor}">
+// ✅ Instead: Use [class.active] and [style.color]
+
+// ❌ Using *ngIf/*ngFor when control flow available
+<div *ngIf="isLoading">Loading...</div>
+<div *ngFor="let item of items">{{ item.name }}</div>
+
+// ❌ Accessing browser globals directly (breaks SSR)
+const width = window.innerWidth;
+const item = localStorage.getItem('key');
+const now = new Date();  // Server/client mismatch
+// ✅ Instead: Use inject(DOCUMENT), isPlatformBrowser(), services
+
+// ❌ Subscribing without cleanup
+ngOnInit() {
+  this.dataService.getData().subscribe(data => {
+    this.data = data;  // Potential memory leak
+  });
+}
+
+// ❌ Mutating signals directly
+items()[0].name = 'New Name';  // Direct mutation
+// ✅ Instead: items.update(list => list.map(...))
+```
+
+## HTTP & Services
+
+### HTTP Client Setup
+
+```typescript
+// app.config.ts
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(
+      withInterceptors([authInterceptor, errorInterceptor]),
+      withFetch()
+    )
+  ]
+};
+```
+
+### NgZorro i18n — Always Set Locale Explicitly
+
+NgZorro defaults to **`zh_CN`** (Chinese) when no locale is configured. All locale-dependent labels — popconfirm buttons, date pickers, pagination, empty states, modals — will render in Chinese.
+
+**Always add `provideNzI18n` to `app.config.ts`:**
+
+```typescript
+// app.config.ts
+import { provideNzI18n, en_US } from 'ng-zorro-antd/i18n';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideNzI18n(en_US), // ← required; without this NgZorro uses zh_CN
+    provideNzIcons(icons),
+    // ...
+  ]
+};
+```
+
+```typescript
+// ❌ Missing provideNzI18n → "取消 / 确定" on every nz-popconfirm, nz-modal, etc.
+// ✅ provideNzI18n(en_US) → "Cancel / OK"
+```
+
+### Service Pattern
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class ApiService<T> {
+  private readonly http = inject(HttpClient);
+  private readonly baseUrl = inject(API_BASE_URL);
+  
+  getAll(endpoint: string): Observable<T[]> {
+    return this.http.get<T[]>(`${this.baseUrl}/${endpoint}`);
+  }
+  
+  getById(endpoint: string, id: string): Observable<T> {
+    return this.http.get<T>(`${this.baseUrl}/${endpoint}/${id}`);
+  }
+  
+  create(endpoint: string, data: Partial<T>): Observable<T> {
+    return this.http.post<T>(`${this.baseUrl}/${endpoint}`, data);
+  }
+}
+```
+
+## Routing
+
+### Lazy Loading with Standalone
+
+```typescript
+// app.routes.ts
+export const routes: Routes = [
+  {
+    path: 'dashboard',
+    loadComponent: () => import('./features/dashboard/dashboard.component')
+      .then(m => m.DashboardComponent)
+  },
+  {
+    path: 'products',
+    loadChildren: () => import('./features/products/products.routes')
+      .then(m => m.PRODUCT_ROUTES)
+  }
+];
+```
+
+### Route Configuration
+
+```typescript
+// app.config.ts
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideRouter(
+      routes,
+      withComponentInputBinding(),     // Bind route params to inputs
+      withViewTransitions(),           // Enable view transitions
+      withPreloading(PreloadAllModules)
+    )
+  ]
+};
+```
+
+## File Naming Conventions
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| Component | `{name}.component.ts` | `user-profile.component.ts` |
+| Service | `{name}.service.ts` | `auth.service.ts` |
+| Store | `{name}.store.ts` | `products.store.ts` |
+| Model/Interface | `{name}.model.ts` | `user.model.ts` |
+| Pipe | `{name}.pipe.ts` | `currency-format.pipe.ts` |
+| Directive | `{name}.directive.ts` | `tooltip.directive.ts` |
+| Guard | `{name}.guard.ts` | `auth.guard.ts` |
+| Interceptor | `{name}.interceptor.ts` | `error.interceptor.ts` |
+| Routes | `{feature}.routes.ts` | `products.routes.ts` |

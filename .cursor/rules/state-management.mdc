@@ -1,0 +1,503 @@
+---
+description: NgRx Signal Store patterns for scalable state management (Angular 22)
+globs: ["**/*.store.ts", "**/store/**/*.ts"]
+alwaysApply: true
+---
+
+# NgRx Signal Store Conventions
+
+Patterns for building scalable, maintainable state management with NgRx Signals.
+
+## Critical: Signal `mutate()` is Deprecated
+
+> **Angular 22 Breaking Change:** The `mutate()` method on signals has been deprecated and will be removed. Always use `update()` or `set()` for signal modifications.
+
+```typescript
+// ❌ Deprecated: mutate() - DO NOT USE
+items.mutate(arr => arr.push(newItem));
+items.mutate(arr => { arr[0].name = 'New'; });
+
+// ✅ Correct: update() with immutable operations
+items.update(arr => [...arr, newItem]);
+items.update(arr => arr.map((item, i) => i === 0 ? { ...item, name: 'New' } : item));
+
+// ✅ Correct: set() for full replacement
+items.set([...currentItems, newItem]);
+```
+
+**Why this matters:**
+- `mutate()` allowed direct mutation, which bypassed Angular's change detection optimizations
+- `update()` and `set()` enforce immutability, ensuring predictable state changes
+- Signals with immutable updates enable better memoization and performance
+
+## Default Behavior
+
+### Use Feature-Scoped Stores
+
+By default, provide stores at the **feature/route level**, not at root.
+
+```typescript
+// ✅ DEFAULT: Feature-scoped store
+export const ProductStore = signalStore(
+  // No providedIn - will be provided at route level
+  withState(initialState),
+  // ...
+);
+
+// Provide when the route loads
+export const productRoutes: Routes = [{
+  path: 'products',
+  providers: [ProductStore],  // Store lives only in this feature
+  loadComponent: () => import('./products.component')
+}];
+```
+
+### Rationale
+
+1. **Isolation** — Each feature manages its own state, no accidental cross-contamination
+2. **Lazy loading** — Store code loads with the feature, smaller initial bundle
+3. **Automatic cleanup** — Store is destroyed when user leaves the route
+4. **Type safety** — State shape is typed, TypeScript catches errors at compile time:
+   ```typescript
+   // Without types: silent bug
+   patchState(store, { usrs: [] });  // Typo, no error
+   
+   // With Signal Store: compile-time error
+   patchState(store, { usrs: [] });  // ❌ Error: 'usrs' does not exist in type
+   ```
+5. **Testability** — Feature stores are easy to mock and test in isolation
+
+### Documented Exceptions
+
+#### 1. Truly Global State
+
+When state **must persist across all features** (authentication, user preferences, theme), use root-level:
+
+```typescript
+// ✅ EXCEPTION: Global state that survives navigation
+export const AuthStore = signalStore(
+  { providedIn: 'root' },  // Available everywhere, persists across routes
+  withState({ user: null, token: null, isAuthenticated: false }),
+  // ...
+);
+
+export const ThemeStore = signalStore(
+  { providedIn: 'root' },
+  withState({ mode: 'light', fontSize: 'medium' }),
+  // ...
+);
+```
+
+**Use root-level only when:**
+- State must survive route changes (auth, preferences)
+- Multiple unrelated features need the same data
+- The data is loaded once at app startup
+
+#### 2. Shared State Between Related Features
+
+When sibling features need to share state, provide at a common parent:
+
+```typescript
+// Parent route provides shared store
+export const adminRoutes: Routes = [{
+  path: 'admin',
+  providers: [AdminSharedStore],  // Shared by all admin sub-features
+  children: [
+    { path: 'users', loadComponent: () => import('./users.component') },
+    { path: 'settings', loadComponent: () => import('./settings.component') }
+  ]
+}];
+```
+
+---
+
+## Store Definition
+
+Define stores using `signalStore()` with typed state:
+
+```typescript
+import { 
+  signalStore, 
+  withState, 
+  withComputed, 
+  withMethods, 
+  patchState 
+} from '@ngrx/signals';
+import { computed, inject } from '@angular/core';
+
+// 1. Define state interface
+interface FeatureState {
+  items: Item[];
+  selectedId: string | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
+// 2. Define initial state
+const initialState: FeatureState = {
+  items: [],
+  selectedId: null,
+  isLoading: false,
+  error: null
+};
+
+// 3. Create the store
+export const FeatureStore = signalStore(
+  { providedIn: 'root' },  // Or provide at component/route level
+  withState(initialState),
+  withComputed((store) => ({
+    // Computed values
+  })),
+  withMethods((store) => ({
+    // Methods
+  }))
+);
+```
+
+## Computed Values
+
+Use `withComputed` for derived state - never duplicate data:
+
+```typescript
+withComputed((store) => ({
+  // Count
+  itemCount: computed(() => store.items().length),
+  
+  // Filter/Find
+  selectedItem: computed(() => 
+    store.items().find(item => item.id === store.selectedId())
+  ),
+  
+  // Boolean checks
+  hasItems: computed(() => store.items().length > 0),
+  hasError: computed(() => store.error() !== null),
+  canSubmit: computed(() => !store.isLoading() && store.items().length > 0),
+  
+  // Aggregations
+  totalValue: computed(() => 
+    store.items().reduce((sum, item) => sum + item.value, 0)
+  ),
+  
+  // Filtered lists
+  activeItems: computed(() => 
+    store.items().filter(item => item.status === 'active')
+  ),
+  
+  // Sorted lists
+  sortedItems: computed(() => 
+    [...store.items()].sort((a, b) => a.name.localeCompare(b.name))
+  )
+}))
+```
+
+**Note:** Computed values in the same `withComputed` block cannot reference each other. If you need chained computations, use separate `withComputed` blocks or duplicate the logic.
+
+## State Updates
+
+Use `patchState()` for immutable updates:
+
+```typescript
+withMethods((store) => ({
+  // Simple setters
+  setLoading(isLoading: boolean) {
+    patchState(store, { isLoading });
+  },
+  
+  setError(error: string | null) {
+    patchState(store, { error, isLoading: false });
+  },
+  
+  clearError() {
+    patchState(store, { error: null });
+  },
+  
+  // Selection
+  selectItem(id: string) {
+    patchState(store, { selectedId: id });
+  },
+  
+  clearSelection() {
+    patchState(store, { selectedId: null });
+  },
+  
+  // CRUD operations
+  addItem(item: Item) {
+    patchState(store, { 
+      items: [...store.items(), item] 
+    });
+  },
+  
+  updateItem(id: string, changes: Partial<Item>) {
+    patchState(store, {
+      items: store.items().map(item =>
+        item.id === id ? { ...item, ...changes } : item
+      )
+    });
+  },
+  
+  removeItem(id: string) {
+    patchState(store, {
+      items: store.items().filter(item => item.id !== id),
+      selectedId: store.selectedId() === id ? null : store.selectedId()
+    });
+  },
+  
+  // Bulk operations
+  setItems(items: Item[]) {
+    patchState(store, { items, isLoading: false, error: null });
+  },
+  
+  // Reset
+  reset() {
+    patchState(store, initialState);
+  }
+}))
+```
+
+## Async Operations
+
+Use `rxMethod` from `@ngrx/signals/rxjs-interop` for async operations. This is the idiomatic Angular approach that maintains consistency with the Observable-based ecosystem.
+
+```typescript
+import { rxMethod } from '@ngrx/signals/rxjs-interop';
+import { tapResponse } from '@ngrx/operators';
+import { pipe, switchMap, tap } from 'rxjs';
+
+withMethods((store, apiService = inject(ApiService)) => ({
+  
+  // Load items with rxMethod
+  loadItems: rxMethod<void>(
+    pipe(
+      tap(() => patchState(store, { isLoading: true, error: null })),
+      switchMap(() => apiService.getItems().pipe(
+        tapResponse({
+          next: (items) => patchState(store, { items, isLoading: false }),
+          error: (error: Error) => patchState(store, { 
+            isLoading: false, 
+            error: error.message || 'Failed to load items'
+          })
+        })
+      ))
+    )
+  ),
+  
+  // Create with parameter
+  createItem: rxMethod<CreateItemDto>(
+    pipe(
+      tap(() => patchState(store, { isLoading: true, error: null })),
+      switchMap((data) => apiService.create(data).pipe(
+        tapResponse({
+          next: (newItem) => patchState(store, { 
+            items: [...store.items(), newItem],
+            isLoading: false 
+          }),
+          error: () => patchState(store, { 
+            isLoading: false, 
+            error: 'Failed to create item'
+          })
+        })
+      ))
+    )
+  ),
+  
+  // Delete with optimistic update
+  deleteItem: rxMethod<string>(
+    pipe(
+      tap((id) => {
+        // Store previous state for rollback
+        patchState(store, { 
+          _previousItems: store.items(),
+          items: store.items().filter(item => item.id !== id)
+        });
+      }),
+      switchMap((id) => apiService.delete(id).pipe(
+        tapResponse({
+          next: () => patchState(store, { _previousItems: undefined }),
+          error: () => patchState(store, { 
+            items: store._previousItems?.() ?? [],
+            _previousItems: undefined,
+            error: 'Failed to delete'
+          })
+        })
+      ))
+    )
+  )
+}))
+```
+
+## Real-Time Data Patterns
+
+### Streaming Data (WebSocket, SSE, Polling)
+
+```typescript
+withMethods((store, streamService = inject(StreamService)) => ({
+  
+  // Append to collection
+  appendItem(item: Item) {
+    patchState(store, { 
+      items: [...store.items(), item] 
+    });
+  },
+  
+  // Update existing or append
+  upsertItem(item: Item) {
+    const exists = store.items().some(i => i.id === item.id);
+    
+    if (exists) {
+      patchState(store, {
+        items: store.items().map(i => i.id === item.id ? item : i)
+      });
+    } else {
+      patchState(store, {
+        items: [...store.items(), item]
+      });
+    }
+  },
+  
+  // For streaming text (AI responses, logs)
+  appendToBuffer(chunk: string) {
+    patchState(store, {
+      streamBuffer: store.streamBuffer() + chunk
+    });
+  },
+  
+  finalizeStream() {
+    const content = store.streamBuffer();
+    patchState(store, {
+      items: [...store.items(), { id: crypto.randomUUID(), content }],
+      streamBuffer: '',
+      isStreaming: false
+    });
+  }
+}))
+```
+
+## Store Injection & Usage
+
+### In Components
+
+```typescript
+@Component({
+  selector: 'app-feature-container',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  // ...
+})
+export class FeatureContainerComponent implements OnInit {
+  // Inject the store
+  protected readonly store = inject(FeatureStore);
+  
+  ngOnInit() {
+    this.store.loadItems();
+  }
+  
+  onItemSelect(id: string) {
+    this.store.selectItem(id);
+  }
+  
+  onItemDelete(id: string) {
+    this.store.deleteItem(id);
+  }
+}
+```
+
+### In Templates
+
+```html
+@if (store.isLoading()) {
+  <app-loading-indicator />
+} @else if (store.error(); as error) {
+  <app-error-message [message]="error" (retry)="store.loadItems()" />
+} @else {
+  @for (item of store.items(); track item.id) {
+    <app-item-card 
+      [item]="item"
+      [selected]="item.id === store.selectedId()"
+      (click)="store.selectItem(item.id)"
+    />
+  } @empty {
+    <app-empty-state />
+  }
+}
+```
+
+## State Shape Guidelines
+
+1. **Keep state flat** - Avoid deeply nested objects
+2. **Normalize data** - Use IDs for relationships, not nested objects
+3. **Derive, don't duplicate** - Use computed for filtered/sorted lists
+4. **Single source of truth** - Each piece of data lives in one place
+5. **Minimal state** - Only store what can't be derived
+
+```typescript
+// ✅ Good - flat and normalized
+interface GoodState {
+  users: User[];
+  selectedUserId: string | null;
+  isLoading: boolean;
+}
+
+// ❌ Bad - nested and duplicated
+interface BadState {
+  users: User[];
+  selectedUser: User | null;  // Duplicates data from users array
+  filteredUsers: User[];       // Can be derived
+  userCount: number;           // Can be derived
+}
+```
+
+## Store Scope Decision Guide
+
+| State Type | Scope | Example |
+|------------|-------|---------|
+| Feature-specific data | Route-level | `ProductStore`, `OrderStore` |
+| Auth/session | Root-level | `AuthStore`, `SessionStore` |
+| User preferences | Root-level | `ThemeStore`, `SettingsStore` |
+| Shared between siblings | Parent route | `AdminSharedStore` |
+| Component-local | Component providers | Rare, for complex isolated widgets |
+
+## Anti-Patterns
+
+```typescript
+// ❌ BAD: Everything at root level
+export const ProductStore = signalStore(
+  { providedIn: 'root' },  // Why? Products don't need to persist globally
+  // ...
+);
+
+// ❌ BAD: Duplicating derived state
+interface BadState {
+  users: User[];
+  activeUsers: User[];      // Can be computed from users
+  userCount: number;        // Can be computed from users.length
+  selectedUser: User | null; // Duplicates data from users array
+}
+
+// ❌ BAD: Using deprecated mutate() (Angular 22)
+items.mutate(arr => arr.push(newItem));  // Deprecated!
+items.mutate(arr => { arr[0].done = true; });  // Deprecated!
+
+// ✅ GOOD: Use update() with immutable operations
+items.update(arr => [...arr, newItem]);
+items.update(arr => arr.map((item, i) => 
+  i === 0 ? { ...item, done: true } : item
+));
+
+// ❌ BAD: Mutating signals directly
+this.store.items().push(newItem);  // Mutation - signal won't notify
+
+// ✅ GOOD: Immutable update via patchState
+patchState(store, { items: [...store.items(), newItem] });
+```
+
+## Why Signal Store over Classic NgRx?
+
+| Aspect | Classic NgRx | Signal Store |
+|--------|--------------|--------------|
+| Files needed | 4+ (actions, reducer, selectors, effects) | 1 (store.ts) |
+| Boilerplate | High | Low |
+| Learning curve | Steep | Gentle |
+| Type safety | Good | Excellent (inferred) |
+| Best for | Large enterprise apps | Most Angular apps |
+
+**Use Classic NgRx only when:** You need Redux DevTools time-travel, have a massive shared state tree, or team already knows it well.

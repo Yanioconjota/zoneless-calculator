@@ -1,0 +1,315 @@
+---
+description: Screaming Architecture folder structure for scalable Angular applications
+globs: ["**/src/app/**/*.ts"]
+alwaysApply: true
+---
+
+# Folder Structure (Screaming Architecture)
+
+The folder structure should "scream" the intent of the application. Looking at the `/features` folder should immediately tell you what the application does.
+
+## Root Structure
+
+```
+src/
+├── app/
+│   ├── core/           # Singleton services, guards, interceptors
+│   ├── shared/         # Reusable components, pipes, directives
+│   ├── features/       # Feature modules (THE MAIN FOLDERS)
+│   ├── app.component.ts
+│   ├── app.config.ts
+│   └── app.routes.ts
+│
+├── environments/       # Environment configurations
+├── styles/             # Global styles, variables, themes
+├── assets/             # Static assets
+└── index.html
+```
+
+## Core Module (`/core`)
+
+Singleton services and app-wide infrastructure:
+
+```
+core/
+├── services/
+│   ├── api.service.ts          # Base HTTP service
+│   ├── auth.service.ts         # Authentication
+│   ├── storage.service.ts      # LocalStorage/SessionStorage
+│   └── notification.service.ts # Toast/snackbar notifications
+│
+├── interceptors/
+│   ├── auth.interceptor.ts     # Add auth headers
+│   └── error.interceptor.ts    # Global error handling
+│
+├── guards/
+│   ├── auth.guard.ts           # Route protection
+│   └── role.guard.ts           # Role-based access
+│
+├── models/
+│   └── api.models.ts           # Shared API interfaces
+│
+└── tokens/
+    └── injection-tokens.ts     # DI tokens
+```
+
+**Rules for `/core`:**
+- Services are `providedIn: 'root'` (singletons)
+- No components in core
+- No feature-specific logic
+- Only app-wide, cross-cutting concerns
+
+## Shared Module (`/shared`)
+
+Reusable, stateless UI elements:
+
+```
+shared/
+├── components/
+│   ├── button/
+│   │   ├── button.component.ts
+│   │   ├── button.component.scss
+│   │   └── button.component.spec.ts
+│   │
+│   ├── input/
+│   ├── card/
+│   ├── modal/
+│   ├── loading-spinner/
+│   ├── empty-state/
+│   ├── error-message/
+│   ├── avatar/
+│   ├── badge/
+│   └── tooltip/
+│
+├── pipes/
+│   ├── truncate.pipe.ts
+│   ├── relative-time.pipe.ts
+│   ├── safe-html.pipe.ts
+│   └── highlight.pipe.ts
+│
+├── directives/
+│   ├── click-outside.directive.ts
+│   ├── auto-focus.directive.ts
+│   ├── lazy-load.directive.ts
+│   └── infinite-scroll.directive.ts
+│
+└── validators/
+    ├── email.validator.ts
+    └── password.validator.ts
+```
+
+**Rules for `/shared`:**
+- Components must be **dumb** (no injected services except utilities)
+- Components must be **reusable** across multiple features
+- No feature-specific logic
+- All components standalone
+- Export public API via barrel files
+
+## Features (`/features`)
+
+Self-contained feature modules organized by business domain:
+
+```
+features/
+├── dashboard/
+│   ├── components/
+│   │   ├── dashboard-container/    # Smart component
+│   │   ├── stats-card/             # Dumb component
+│   │   ├── activity-feed/          # Dumb component
+│   │   └── quick-actions/          # Dumb component
+│   ├── store/
+│   │   └── dashboard.store.ts
+│   ├── models/
+│   │   └── dashboard.models.ts
+│   └── dashboard.routes.ts
+│
+├── products/
+│   ├── components/
+│   │   ├── product-list-container/
+│   │   ├── product-card/
+│   │   ├── product-filters/
+│   │   ├── product-detail/
+│   │   └── product-form/
+│   ├── services/
+│   │   └── product-api.service.ts  # Feature-specific API
+│   ├── store/
+│   │   └── products.store.ts
+│   ├── models/
+│   │   └── product.models.ts
+│   └── products.routes.ts
+│
+├── users/
+│   ├── components/
+│   ├── store/
+│   ├── models/
+│   └── users.routes.ts
+│
+└── settings/
+    ├── components/
+    ├── store/
+    └── settings.routes.ts
+```
+
+**Rules for `/features`:**
+- Folder names describe **business capabilities**
+- Each feature is **self-contained**
+- One **smart component** (container) per feature
+- Multiple **dumb components** as needed
+- Feature-specific store, models, and services live inside
+- Routes are lazy-loaded
+- Features should not directly import from other features
+
+## Alternative: Type/Feature Structure
+
+For smaller projects or when grouping by type makes more sense:
+
+```
+src/app/
+├── models/
+│   ├── user/
+│   │   └── user.model.ts
+│   └── product/
+│       └── product.model.ts
+│
+├── services/
+│   ├── user/
+│   │   └── user.service.ts
+│   └── product/
+│       └── product.service.ts
+│
+├── stores/
+│   ├── user/
+│   │   └── user.store.ts
+│   └── product/
+│       └── product.store.ts
+│
+├── components/
+│   ├── users/
+│   │   ├── user-card/
+│   │   ├── user-form/
+│   │   └── user-directory-container/
+│   └── products/
+│       ├── product-card/
+│       └── product-list-container/
+│
+└── routes/
+    └── app.routes.ts
+```
+
+## Smart vs Dumb Components
+
+### Smart Components (Containers)
+```
+features/{feature}/components/{feature}-container/
+```
+
+Responsibilities:
+- Inject store and services
+- Manage lifecycle (connect/disconnect)
+- Orchestrate child components
+- Handle events from children
+- NO direct DOM manipulation
+
+### Dumb Components (Presentational)
+```
+features/{feature}/components/{component-name}/
+shared/components/{component-name}/
+```
+
+Responsibilities:
+- Receive data via `input()`
+- Emit events via `output()`
+- Render UI based on inputs
+- NO injected services (except pure utilities)
+- Highly testable and reusable
+
+## File Naming Conventions
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| Component | `{name}.component.ts` | `product-card.component.ts` |
+| Service | `{name}.service.ts` | `product-api.service.ts` |
+| Store | `{name}.store.ts` | `products.store.ts` |
+| Model | `{name}.models.ts` | `product.models.ts` |
+| Pipe | `{name}.pipe.ts` | `truncate.pipe.ts` |
+| Directive | `{name}.directive.ts` | `tooltip.directive.ts` |
+| Guard | `{name}.guard.ts` | `auth.guard.ts` |
+| Interceptor | `{name}.interceptor.ts` | `error.interceptor.ts` |
+| Routes | `{feature}.routes.ts` | `products.routes.ts` |
+
+## Import Aliases
+
+Configure in `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["src/app/core/*"],
+      "@shared/*": ["src/app/shared/*"],
+      "@features/*": ["src/app/features/*"],
+      "@env/*": ["src/environments/*"]
+    }
+  }
+}
+```
+
+Usage:
+```typescript
+// ✅ Correct: Use path aliases
+import { ApiService } from '@core/services/api.service';
+import { ButtonComponent } from '@shared/components/button/button.component';
+import { ProductStore } from '@features/products/store/products.store';
+import { environment } from '@env/environment';
+
+// ❌ Incorrect: Relative paths across boundaries
+import { ApiService } from '../../../core/services/api.service';
+```
+
+## Barrel Files (index.ts)
+
+Export public API from each module:
+
+```typescript
+// shared/components/index.ts
+export * from './button/button.component';
+export * from './card/card.component';
+export * from './loading-spinner/loading-spinner.component';
+
+// Usage
+import { ButtonComponent, CardComponent } from '@shared/components';
+```
+
+## Routing Structure
+
+```typescript
+// app.routes.ts
+export const routes: Routes = [
+  { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
+  {
+    path: 'dashboard',
+    loadChildren: () => import('@features/dashboard/dashboard.routes')
+      .then(m => m.DASHBOARD_ROUTES)
+  },
+  {
+    path: 'products',
+    loadChildren: () => import('@features/products/products.routes')
+      .then(m => m.PRODUCT_ROUTES)
+  },
+  { path: '**', redirectTo: 'dashboard' }
+];
+
+// features/products/products.routes.ts
+export const PRODUCT_ROUTES: Routes = [
+  {
+    path: '',
+    component: ProductListContainerComponent
+  },
+  {
+    path: ':id',
+    loadComponent: () => import('./components/product-detail/product-detail.component')
+      .then(m => m.ProductDetailComponent)
+  }
+];
+```

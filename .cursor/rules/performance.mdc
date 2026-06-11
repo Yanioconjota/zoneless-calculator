@@ -1,0 +1,340 @@
+---
+description: Performance optimization patterns - change detection, lazy loading, virtual scrolling, bundle optimization
+globs: ["**/*.ts", "**/*.html", "**/*.scss"]
+alwaysApply: true
+---
+
+# Performance Optimization
+
+Optimize Angular applications for Core Web Vitals and smooth user experience.
+
+## Default Behavior
+
+### OnPush Change Detection (Required)
+
+All components must use OnPush change detection strategy.
+
+```typescript
+// ✅ Default: OnPush strategy
+@Component({
+  selector: 'app-feature',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  // ...
+})
+export class FeatureComponent {}
+```
+
+### Lazy Load Routes
+
+All feature routes must be lazy loaded.
+
+```typescript
+// ✅ Default: Lazy loaded routes
+export const routes: Routes = [
+  {
+    path: 'dashboard',
+    loadComponent: () => import('./features/dashboard/dashboard.component')
+      .then(m => m.DashboardComponent)
+  },
+  {
+    path: 'products',
+    loadChildren: () => import('./features/products/products.routes')
+      .then(m => m.PRODUCT_ROUTES)
+  }
+];
+```
+
+### Debounce User Input
+
+Debounce text inputs that trigger expensive operations.
+
+```typescript
+// ✅ Default: Debounced search
+toObservable(this.searchInput).pipe(
+  debounceTime(300),
+  distinctUntilChanged(),
+  takeUntilDestroyed()
+).subscribe(term => this.store.setSearchTerm(term));
+```
+
+### Track Items in Loops
+
+Always use `track` in `@for` loops.
+
+```html
+<!-- ✅ Default: Track by unique identifier -->
+@for (item of items(); track item.id) {
+  <app-item-card [item]="item" />
+}
+```
+
+### Use NgOptimizedImage
+
+Use optimized image directive for all images.
+
+```typescript
+// ✅ Default: Optimized images
+import { NgOptimizedImage } from '@angular/common';
+
+@Component({
+  imports: [NgOptimizedImage],
+  template: `
+    <img ngSrc="/product.jpg" width="400" height="300" alt="Product" />
+  `
+})
+```
+
+## Rationale
+
+1. **LCP (Largest Contentful Paint)** - Lazy loading and image optimization improve initial load.
+2. **FID (First Input Delay)** - OnPush reduces unnecessary change detection cycles.
+3. **CLS (Cumulative Layout Shift)** - Fixed image dimensions prevent layout shifts.
+4. **Bundle size** - Lazy loading reduces initial bundle.
+
+## Documented Exceptions
+
+### 1. Priority Images (LCP Candidates)
+
+Add `priority` attribute to above-the-fold images that are LCP candidates.
+
+```html
+<!-- ✅ Exception: Priority for hero/LCP images -->
+<img 
+  ngSrc="/hero.jpg" 
+  width="1200" 
+  height="600"
+  priority
+  alt="Hero image"
+/>
+```
+
+### 2. Deferred Loading for Heavy Components
+
+Use `@defer` for components below the fold or conditionally shown.
+
+```html
+<!-- ✅ Exception: Defer heavy components -->
+@defer (on viewport) {
+  <app-heavy-chart [data]="chartData()" />
+} @placeholder {
+  <app-chart-skeleton />
+} @loading (minimum 200ms) {
+  <app-loading-spinner />
+}
+
+<!-- ✅ Exception: Defer on interaction -->
+@defer (on interaction) {
+  <app-rich-editor />
+} @placeholder {
+  <textarea placeholder="Click to load editor..."></textarea>
+}
+```
+
+### 3. Virtual Scrolling for Large Lists
+
+Use CDK virtual scrolling for lists with 100+ items.
+
+```typescript
+// ✅ Exception: Virtual scroll for large lists
+import { ScrollingModule } from '@angular/cdk/scrolling';
+
+@Component({
+  imports: [ScrollingModule],
+  template: `
+    <cdk-virtual-scroll-viewport itemSize="50" class="viewport">
+      <div *cdkVirtualFor="let item of items(); trackBy: trackById" class="item">
+        {{ item.name }}
+      </div>
+    </cdk-virtual-scroll-viewport>
+  `
+})
+export class VirtualListComponent {
+  trackById(index: number, item: Item): string {
+    return item.id;
+  }
+}
+```
+
+### 4. Run Outside Angular Zone
+
+For high-frequency events that don't need to trigger change detection.
+
+```typescript
+// ✅ Exception: Scroll handler outside zone
+export class InfiniteScrollDirective {
+  private readonly ngZone = inject(NgZone);
+  
+  constructor() {
+    this.ngZone.runOutsideAngular(() => {
+      fromEvent(window, 'scroll').pipe(
+        throttleTime(200),
+        takeUntilDestroyed()
+      ).subscribe(() => {
+        if (this.isNearBottom()) {
+          this.ngZone.run(() => this.loadMore.emit());
+        }
+      });
+    });
+  }
+}
+```
+
+### 5. Eager Loading for Frequently Used Routes
+
+Preload routes that users typically visit.
+
+```typescript
+// ✅ Exception: Preload important routes
+provideRouter(
+  routes,
+  withPreloading(PreloadAllModules)  // Or custom strategy
+)
+
+// Custom selective preloading
+@Injectable({ providedIn: 'root' })
+export class SelectivePreloadingStrategy implements PreloadingStrategy {
+  preload(route: Route, load: () => Observable<any>): Observable<any> {
+    return route.data?.['preload'] ? load() : of(null);
+  }
+}
+```
+
+## Anti-Patterns
+
+```typescript
+// ❌ Missing OnPush
+@Component({
+  // No changeDetection specified = Default (bad)
+})
+
+// ❌ Triggering change detection in loops
+export class BadComponent {
+  constructor() {
+    setInterval(() => this.checkSomething(), 1000);  // Triggers CD constantly
+  }
+}
+
+// ❌ Scroll handlers in zone
+fromEvent(window, 'scroll').subscribe(() => {
+  // Triggers change detection on every scroll event
+});
+
+// ❌ Missing track in @for
+@for (item of items()) {  // No track = poor performance
+  <app-item [item]="item" />
+}
+
+// ❌ Importing entire libraries
+import * as _ from 'lodash';  // Imports entire lodash
+
+// ✅ Instead: Import specific functions
+import { debounce } from 'lodash-es/debounce';
+
+// ❌ Images without dimensions
+<img src="/product.jpg" alt="Product" />  // Causes CLS
+```
+
+## Computed Signals for Memoization
+
+Computed signals automatically memoize - use them for expensive derivations.
+
+```typescript
+// ✅ Default: Memoized expensive computation
+expensiveComputation = computed(() => {
+  const items = this.store.items();
+  return items.reduce((acc, item) => {
+    return acc + this.complexCalculation(item);
+  }, 0);
+});
+```
+
+## Bundle Optimization
+
+### Tree Shaking
+
+```typescript
+// ✅ Tree-shakeable imports
+import { map, filter } from 'rxjs/operators';
+import { debounce } from 'lodash-es/debounce';
+
+// ❌ Non-tree-shakeable
+import * as rxjs from 'rxjs';
+import _ from 'lodash';
+```
+
+### Code Splitting
+
+Keep feature stores scoped to routes for better splitting.
+
+```typescript
+// ✅ Feature-scoped store
+export const productRoutes: Routes = [{
+  path: 'products',
+  providers: [ProductStore],  // Scoped to this route
+  loadComponent: () => import('./products.component')
+}];
+```
+
+## Memory Management
+
+### Cleanup Subscriptions
+
+```typescript
+// ✅ Default: Automatic cleanup
+export class DataComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  
+  ngOnInit() {
+    this.dataService.getData().pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe();
+  }
+}
+```
+
+### Avoid Closures Holding References
+
+```typescript
+// ❌ Closure keeps component alive
+export class BadComponent {
+  ngOnInit() {
+    window.addEventListener('resize', () => {
+      this.handleResize();  // 'this' holds reference
+    });
+  }
+}
+
+// ✅ Proper cleanup
+export class GoodComponent implements OnDestroy {
+  private resizeHandler = () => this.handleResize();
+  
+  ngOnInit() {
+    window.addEventListener('resize', this.resizeHandler);
+  }
+  
+  ngOnDestroy() {
+    window.removeEventListener('resize', this.resizeHandler);
+  }
+}
+```
+
+## Core Web Vitals Targets
+
+| Metric | Target | What It Measures |
+|--------|--------|------------------|
+| **LCP** (Largest Contentful Paint) | < 2.5s | Loading performance |
+| **FID** (First Input Delay) | < 100ms | Interactivity |
+| **CLS** (Cumulative Layout Shift) | < 0.1 | Visual stability |
+
+## Checklist
+
+- [ ] All components use `ChangeDetectionStrategy.OnPush`
+- [ ] Routes are lazy loaded
+- [ ] Heavy components use `@defer`
+- [ ] Images use `NgOptimizedImage` with proper sizing
+- [ ] LCP images have `priority` attribute
+- [ ] Large lists use virtual scrolling
+- [ ] Search inputs are debounced
+- [ ] Scroll handlers run outside zone and are throttled
+- [ ] All subscriptions are cleaned up
+- [ ] Bundle is analyzed for unnecessary imports

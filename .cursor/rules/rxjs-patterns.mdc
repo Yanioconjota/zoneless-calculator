@@ -1,0 +1,477 @@
+---
+description: RxJS patterns and best practices for Angular applications
+globs: ["**/*.ts"]
+alwaysApply: true
+---
+
+# RxJS Patterns
+
+Reference guide for RxJS operators and patterns in Angular applications.
+
+## Subscription Management
+
+### Using takeUntilDestroyed (Preferred)
+
+```typescript
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+@Component({...})
+export class FeatureComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly dataService = inject(DataService);
+  
+  ngOnInit() {
+    this.dataService.getData().pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(data => {
+      this.handleData(data);
+    });
+  }
+}
+```
+
+### In Constructor (No DestroyRef needed)
+
+```typescript
+@Component({...})
+export class FeatureComponent {
+  constructor() {
+    // takeUntilDestroyed() works in constructor without DestroyRef
+    inject(DataService).getData().pipe(
+      takeUntilDestroyed()
+    ).subscribe(data => this.handleData(data));
+  }
+}
+```
+
+### Async Pipe (Best for Templates)
+
+```html
+<!-- Automatic subscription management -->
+@if (data$ | async; as data) {
+  <app-content [data]="data" />
+} @else {
+  <app-loading />
+}
+```
+
+## Signals/RxJS Interop
+
+### Converting Observables to Signals
+
+```typescript
+import { toSignal } from '@angular/core/rxjs-interop';
+
+@Component({...})
+export class FeatureComponent {
+  private readonly route = inject(ActivatedRoute);
+  
+  // Observable to Signal
+  params = toSignal(this.route.paramMap);
+  
+  // With initial value
+  data = toSignal(this.dataService.getData(), { initialValue: [] });
+  
+  // Require sync (throws if no initial emission)
+  user = toSignal(this.authService.user$, { requireSync: true });
+}
+```
+
+### Converting Signals to Observables
+
+```typescript
+import { toObservable } from '@angular/core/rxjs-interop';
+
+@Component({...})
+export class SearchComponent {
+  searchTerm = signal('');
+  
+  // Signal to Observable for RxJS operations
+  private searchTerm$ = toObservable(this.searchTerm);
+  
+  constructor() {
+    this.searchTerm$.pipe(
+      debounceTime(300),
+      distinctUntilChanged(),
+      switchMap(term => this.searchService.search(term)),
+      takeUntilDestroyed()
+    ).subscribe(results => {
+      this.store.setResults(results);
+    });
+  }
+}
+```
+
+## Common Operators
+
+### Transformation
+
+```typescript
+// map - transform each value
+source$.pipe(
+  map(user => user.name)
+)
+
+// switchMap - cancel previous, emit new
+searchTerm$.pipe(
+  switchMap(term => this.api.search(term))
+)
+
+// mergeMap - concurrent requests (use with caution)
+ids$.pipe(
+  mergeMap(id => this.api.getById(id), 3)  // Max 3 concurrent
+)
+
+// concatMap - sequential requests
+commands$.pipe(
+  concatMap(cmd => this.api.execute(cmd))
+)
+
+// exhaustMap - ignore while processing
+clicks$.pipe(
+  exhaustMap(() => this.api.submit())  // Ignores clicks during request
+)
+```
+
+### Filtering
+
+```typescript
+// filter
+numbers$.pipe(
+  filter(n => n > 0)
+)
+
+// distinctUntilChanged - only emit when value changes
+value$.pipe(
+  distinctUntilChanged()
+)
+
+// distinctUntilChanged with custom comparison
+objects$.pipe(
+  distinctUntilChanged((prev, curr) => prev.id === curr.id)
+)
+
+// take - only first n emissions
+source$.pipe(
+  take(5)
+)
+
+// first - only first emission (errors if empty)
+source$.pipe(
+  first()
+)
+
+// skip - skip first n emissions
+source$.pipe(
+  skip(1)
+)
+```
+
+### Timing
+
+```typescript
+// debounceTime - wait for pause in emissions
+input$.pipe(
+  debounceTime(300)
+)
+
+// throttleTime - rate limit emissions
+scroll$.pipe(
+  throttleTime(100)
+)
+
+// delay - delay all emissions
+source$.pipe(
+  delay(1000)
+)
+
+// timeout - error if no emission within time
+api$.pipe(
+  timeout(5000)
+)
+```
+
+### Combination
+
+```typescript
+// combineLatest - emit when any source emits (requires all to emit once)
+combineLatest([user$, settings$, permissions$]).pipe(
+  map(([user, settings, permissions]) => ({
+    user,
+    settings,
+    permissions
+  }))
+)
+
+// forkJoin - emit when all complete
+forkJoin({
+  users: this.api.getUsers(),
+  products: this.api.getProducts(),
+  orders: this.api.getOrders()
+}).subscribe(({ users, products, orders }) => {
+  // All requests completed
+});
+
+// merge - combine multiple into one
+merge(click$, keypress$, touch$).pipe(
+  map(() => 'interaction')
+)
+
+// withLatestFrom - combine with latest from another
+action$.pipe(
+  withLatestFrom(state$),
+  map(([action, state]) => ({ action, state }))
+)
+```
+
+## Error Handling
+
+### catchError
+
+```typescript
+// Recover with default value
+getData().pipe(
+  catchError(error => {
+    console.error('Error:', error);
+    return of([]);  // Return empty array on error
+  })
+)
+
+// Rethrow after logging
+getData().pipe(
+  catchError(error => {
+    this.logService.error(error);
+    return throwError(() => error);
+  })
+)
+
+// Retry then catch
+getData().pipe(
+  retry(3),
+  catchError(error => of({ error: true, message: error.message }))
+)
+```
+
+### retry and retryWhen
+
+```typescript
+// Simple retry
+api$.pipe(
+  retry(3)
+)
+
+// Retry with delay
+api$.pipe(
+  retry({
+    count: 3,
+    delay: 1000
+  })
+)
+
+// Exponential backoff
+api$.pipe(
+  retry({
+    count: 3,
+    delay: (error, retryCount) => {
+      const delay = Math.pow(2, retryCount) * 1000;
+      return timer(delay);
+    }
+  })
+)
+```
+
+## Higher-Order Observables
+
+### Understanding switchMap vs mergeMap vs concatMap vs exhaustMap
+
+```typescript
+// switchMap - CANCEL previous when new arrives
+// Use for: search, autocomplete, route changes
+searchTerm$.pipe(
+  switchMap(term => this.api.search(term))
+  // If user types fast, previous requests are cancelled
+)
+
+// mergeMap - CONCURRENT execution
+// Use for: logging, analytics, fire-and-forget
+logEvents$.pipe(
+  mergeMap(event => this.api.log(event))
+  // All requests run concurrently
+)
+
+// concatMap - SEQUENTIAL execution
+// Use for: ordered operations, queue processing
+commands$.pipe(
+  concatMap(cmd => this.api.execute(cmd))
+  // Each request waits for previous to complete
+)
+
+// exhaustMap - IGNORE while busy
+// Use for: form submissions, prevent double-clicks
+submitButton$.pipe(
+  exhaustMap(() => this.api.submit(form))
+  // Ignores clicks while request is pending
+)
+```
+
+## Subjects
+
+### When to Use Which Subject
+
+```typescript
+// Subject - basic multicasting
+const subject = new Subject<string>();
+
+// BehaviorSubject - has current value, emits to new subscribers
+const state$ = new BehaviorSubject<State>(initialState);
+console.log(state$.value);  // Get current value synchronously
+
+// ReplaySubject - replays n last values to new subscribers
+const cache$ = new ReplaySubject<Data>(1);  // Cache last value
+
+// AsyncSubject - only emits last value on complete
+const result$ = new AsyncSubject<Result>();
+```
+
+### Subject Best Practices
+
+```typescript
+// ❌ Bad - exposing Subject publicly
+@Injectable()
+export class BadService {
+  public data$ = new BehaviorSubject<Data>(null);
+}
+
+// ✅ Good - expose as Observable, private Subject
+@Injectable()
+export class GoodService {
+  private dataSubject = new BehaviorSubject<Data | null>(null);
+  
+  // Expose as readonly Observable
+  readonly data$ = this.dataSubject.asObservable();
+  
+  updateData(data: Data) {
+    this.dataSubject.next(data);
+  }
+}
+```
+
+## Real-Time Data Patterns
+
+### WebSocket Connection
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class WebSocketService {
+  private socket$: WebSocketSubject<any> | null = null;
+  private readonly reconnectInterval = 5000;
+  
+  connect(): Observable<WsMessage> {
+    if (!this.socket$) {
+      this.socket$ = webSocket({
+        url: 'ws://localhost:8000/ws',
+        openObserver: {
+          next: () => console.log('WebSocket connected')
+        },
+        closeObserver: {
+          next: () => {
+            console.log('WebSocket disconnected');
+            this.socket$ = null;
+          }
+        }
+      });
+    }
+    
+    return this.socket$.pipe(
+      retry({
+        delay: this.reconnectInterval
+      }),
+      catchError(error => {
+        console.error('WebSocket error:', error);
+        return EMPTY;
+      })
+    );
+  }
+  
+  send(message: any) {
+    this.socket$?.next(message);
+  }
+  
+  disconnect() {
+    this.socket$?.complete();
+    this.socket$ = null;
+  }
+}
+```
+
+### Polling
+
+```typescript
+// Simple polling
+const poll$ = interval(5000).pipe(
+  switchMap(() => this.api.getData()),
+  takeUntilDestroyed()
+);
+
+// Smart polling - stops when tab hidden
+const smartPoll$ = interval(5000).pipe(
+  filter(() => document.visibilityState === 'visible'),
+  switchMap(() => this.api.getData()),
+  takeUntilDestroyed()
+);
+```
+
+## Custom Operators
+
+### Creating Custom Operators
+
+```typescript
+// Custom operator for loading state
+function withLoading<T>(loadingSignal: WritableSignal<boolean>) {
+  return (source: Observable<T>) =>
+    source.pipe(
+      tap({
+        subscribe: () => loadingSignal.set(true),
+        finalize: () => loadingSignal.set(false)
+      })
+    );
+}
+
+// Usage
+const isLoading = signal(false);
+
+this.api.getData().pipe(
+  withLoading(isLoading)
+).subscribe();
+```
+
+### Debug Operator
+
+```typescript
+function debug<T>(tag: string) {
+  return (source: Observable<T>) =>
+    source.pipe(
+      tap({
+        next: value => console.log(`[${tag}] Next:`, value),
+        error: error => console.error(`[${tag}] Error:`, error),
+        complete: () => console.log(`[${tag}] Complete`)
+      })
+    );
+}
+
+// Usage
+data$.pipe(
+  debug('UserData'),
+  map(...)
+).subscribe();
+```
+
+## Memory Leak Prevention Checklist
+
+- [ ] All subscriptions use `takeUntilDestroyed()` or async pipe
+- [ ] No manual subscriptions without cleanup
+- [ ] Subjects are completed in `ngOnDestroy`
+- [ ] Event listeners are removed on destroy
+- [ ] Intervals and timers are cleared
+- [ ] WebSocket connections are closed
+- [ ] No closures holding component references

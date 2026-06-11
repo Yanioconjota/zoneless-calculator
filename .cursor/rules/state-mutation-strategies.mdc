@@ -1,0 +1,201 @@
+---
+description: When to use optimistic vs pessimistic state updates based on reversibility and risk
+globs: ["**/*.store.ts", "**/*.service.ts", "**/store/**/*.ts"]
+alwaysApply: true
+---
+
+# State Mutation Strategies
+
+Choose the right state update strategy based on the operation's characteristics, not its CRUD category.
+
+## Default Behavior
+
+### Use Pessimistic Updates (Wait for Server)
+
+By default, wait for the server to confirm before updating local state.
+
+```typescript
+// ✅ Default: Pessimistic update
+async createItem(data: CreateDto) {
+  patchState(store, { isLoading: true, error: null });
+  
+  try {
+    const newItem = await firstValueFrom(api.create(data));
+    patchState(store, { 
+      items: [...store.items(), newItem],  // Update AFTER server confirms
+      isLoading: false 
+    });
+  } catch (error) {
+    patchState(store, { isLoading: false, error: 'Failed to create' });
+  }
+}
+```
+
+## Rationale
+
+1. **Data integrity** - Server is the source of truth; local state reflects confirmed reality.
+2. **No rollback complexity** - If the request fails, state is unchanged.
+3. **Server-generated data** - IDs, timestamps, computed fields come from the server.
+
+## Documented Exceptions
+
+### 1. Optimistic Updates for Reversible, Low-Risk Operations
+
+Use optimistic updates when ALL of these conditions are met:
+- The operation is **reversible** (you can restore previous state)
+- The operation is **idempotent** (doing it twice has the same effect)
+- No **server-generated data** is needed in the response
+- The **failure rate is low** and errors are non-critical
+
+```typescript
+// ✅ Exception: Optimistic delete with rollback
+async deleteItem(id: string) {
+  const previousItems = store.items();
+  
+  // Optimistic: Update immediately
+  patchState(store, {
+    items: previousItems.filter(item => item.id !== id)
+  });
+  
+  try {
+    await firstValueFrom(api.delete(id));
+  } catch (error) {
+    // Rollback on failure
+    patchState(store, { 
+      items: previousItems,
+      error: 'Failed to delete'
+    });
+  }
+}
+```
+
+### 2. Optimistic Updates for Binary/Toggle Operations
+
+Simple state toggles where the intent is unambiguous.
+
+```typescript
+// ✅ Exception: Optimistic toggle
+async toggleComplete(id: string) {
+  const item = store.items().find(i => i.id === id);
+  const previousState = item.completed;
+  
+  // Optimistic: Toggle immediately
+  patchState(store, {
+    items: store.items().map(i => 
+      i.id === id ? { ...i, completed: !i.completed } : i
+    )
+  });
+  
+  try {
+    await firstValueFrom(api.toggleComplete(id));
+  } catch (error) {
+    // Rollback
+    patchState(store, {
+      items: store.items().map(i => 
+        i.id === id ? { ...i, completed: previousState } : i
+      )
+    });
+  }
+}
+```
+
+### 3. Optimistic UI with Pending State
+
+For operations where you want immediate feedback but need to indicate uncertainty.
+
+```typescript
+// ✅ Exception: Optimistic with pending indicator
+async sendMessage(content: string) {
+  const tempId = `temp-${Date.now()}`;
+  const pendingMessage = { 
+    id: tempId, 
+    content, 
+    status: 'pending' as const  // Visual indicator
+  };
+  
+  // Add immediately with pending status
+  patchState(store, {
+    messages: [...store.messages(), pendingMessage]
+  });
+  
+  try {
+    const confirmedMessage = await firstValueFrom(api.send(content));
+    // Replace temp with confirmed
+    patchState(store, {
+      messages: store.messages().map(m => 
+        m.id === tempId ? confirmedMessage : m
+      )
+    });
+  } catch (error) {
+    // Mark as failed, don't remove (let user retry)
+    patchState(store, {
+      messages: store.messages().map(m => 
+        m.id === tempId ? { ...m, status: 'failed' as const } : m
+      )
+    });
+  }
+}
+```
+
+## Anti-Patterns
+
+```typescript
+// ❌ Optimistic create (server generates ID)
+async createItem(data: CreateDto) {
+  const tempItem = { id: 'temp-123', ...data };  // Bad: fake ID
+  patchState(store, { items: [...store.items(), tempItem] });
+  // Problem: What if another component references temp-123?
+}
+
+// ❌ Optimistic update with server-transformed data
+async updateItem(id: string, changes: Partial<Item>) {
+  patchState(store, {
+    items: store.items().map(i => i.id === id ? { ...i, ...changes } : i)
+  });
+  // Problem: Server might normalize data, update timestamps, or reject fields
+}
+
+// ❌ Optimistic without rollback
+async deleteItem(id: string) {
+  patchState(store, {
+    items: store.items().filter(i => i.id !== id)
+  });
+  await firstValueFrom(api.delete(id));
+  // Problem: If API fails, item is gone from UI with no recovery
+}
+```
+
+## Decision Matrix
+
+| Condition | Strategy |
+|-----------|----------|
+| Server generates ID or computed fields | Pessimistic |
+| Server validates/transforms data | Pessimistic |
+| Operation is irreversible | Pessimistic |
+| High failure rate expected | Pessimistic |
+| Simple removal of known entity | Optimistic with rollback |
+| Binary toggle (on/off, true/false) | Optimistic with rollback |
+| User expects instant feedback + can retry | Optimistic with pending state |
+
+## Rollback Pattern
+
+Always capture previous state BEFORE the optimistic update:
+
+```typescript
+async mutate(id: string) {
+  // 1. Capture previous state
+  const previousState = store.items();
+  
+  // 2. Optimistic update
+  patchState(store, { items: /* new state */ });
+  
+  // 3. Try server operation
+  try {
+    await firstValueFrom(api.mutate(id));
+  } catch (error) {
+    // 4. Rollback on failure
+    patchState(store, { items: previousState, error: 'Failed' });
+    throw error;  // Re-throw for caller to handle
+  }
+}
+```

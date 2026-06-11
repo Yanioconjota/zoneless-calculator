@@ -1,0 +1,466 @@
+---
+description: TypeScript best practices for type-safe Angular applications
+globs: ["**/*.ts"]
+alwaysApply: true
+---
+
+# TypeScript Best Practices
+
+Reference guide for TypeScript patterns that improve type safety and maintainability.
+
+## Strict Mode Configuration
+
+Enable all strict checks in `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true
+  }
+}
+```
+
+## Avoid `any` - Use Proper Types
+
+```typescript
+// ❌ Bad - loses type safety
+function processData(data: any): any {
+  return data.items.map((item: any) => item.name);
+}
+
+// ✅ Good - fully typed
+interface DataResponse {
+  items: Item[];
+  total: number;
+}
+
+function processData(data: DataResponse): string[] {
+  return data.items.map(item => item.name);
+}
+```
+
+### When Type is Unknown
+
+```typescript
+// ❌ Bad
+function handleResponse(response: any) {
+  console.log(response.data);
+}
+
+// ✅ Good - use unknown and validate
+function handleResponse(response: unknown) {
+  if (isValidResponse(response)) {
+    console.log(response.data);
+  }
+}
+
+function isValidResponse(value: unknown): value is { data: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'data' in value &&
+    typeof (value as { data: unknown }).data === 'string'
+  );
+}
+```
+
+## Type Guards
+
+### Custom Type Guards
+
+```typescript
+interface User {
+  id: string;
+  name: string;
+  role: 'admin' | 'user';
+}
+
+interface Guest {
+  sessionId: string;
+}
+
+type Visitor = User | Guest;
+
+// Type guard function
+function isUser(visitor: Visitor): visitor is User {
+  return 'id' in visitor && 'role' in visitor;
+}
+
+// Usage
+function getDisplayName(visitor: Visitor): string {
+  if (isUser(visitor)) {
+    return visitor.name;  // TypeScript knows this is User
+  }
+  return `Guest ${visitor.sessionId}`;
+}
+```
+
+### Discriminated Unions
+
+```typescript
+// Use a common discriminator property
+type ApiResponse<T> = 
+  | { status: 'success'; data: T }
+  | { status: 'error'; error: string }
+  | { status: 'loading' };
+
+function handleResponse<T>(response: ApiResponse<T>) {
+  switch (response.status) {
+    case 'success':
+      console.log(response.data);  // data is available
+      break;
+    case 'error':
+      console.error(response.error);  // error is available
+      break;
+    case 'loading':
+      console.log('Loading...');
+      break;
+  }
+}
+```
+
+### WebSocket Message Type Guards
+
+```typescript
+interface WsDataMessage {
+  type: 'data';
+  payload: unknown;
+}
+
+interface WsErrorMessage {
+  type: 'error';
+  message: string;
+}
+
+interface WsHeartbeat {
+  type: 'heartbeat';
+}
+
+type WsMessage = WsDataMessage | WsErrorMessage | WsHeartbeat;
+
+function isErrorMessage(msg: WsMessage): msg is WsErrorMessage {
+  return msg.type === 'error';
+}
+
+function handleMessage(msg: WsMessage) {
+  if (isErrorMessage(msg)) {
+    showError(msg.message);  // TypeScript knows message exists
+  }
+}
+```
+
+## Utility Types
+
+### Common Utility Types
+
+```typescript
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: Date;
+  settings: UserSettings;
+}
+
+// Partial - all properties optional
+type UserUpdate = Partial<User>;
+
+// Required - all properties required
+type CompleteUser = Required<User>;
+
+// Pick - select specific properties
+type UserPreview = Pick<User, 'id' | 'name'>;
+
+// Omit - exclude specific properties
+type CreateUserDto = Omit<User, 'id' | 'createdAt'>;
+
+// Readonly - immutable
+type ImmutableUser = Readonly<User>;
+
+// Record - key-value mapping
+type UserRoles = Record<string, 'admin' | 'user' | 'guest'>;
+
+// Extract / Exclude
+type UserRole = 'admin' | 'user' | 'guest';
+type AdminRole = Extract<UserRole, 'admin'>;  // 'admin'
+type NonAdminRole = Exclude<UserRole, 'admin'>;  // 'user' | 'guest'
+```
+
+### Creating Custom Utility Types
+
+```typescript
+// Make specific properties required
+type RequireFields<T, K extends keyof T> = T & Required<Pick<T, K>>;
+
+type UserWithEmail = RequireFields<Partial<User>, 'email'>;
+
+// Deep partial
+type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
+// Non-nullable
+type NonNullableFields<T> = {
+  [P in keyof T]: NonNullable<T[P]>;
+};
+```
+
+## Generic Patterns
+
+### Generic Components
+
+```typescript
+// Generic list component
+@Component({
+  selector: 'app-data-list',
+  template: `
+    @for (item of items(); track trackFn()(item)) {
+      <ng-container *ngTemplateOutlet="itemTemplate(); context: { $implicit: item }" />
+    }
+  `
+})
+export class DataListComponent<T> {
+  items = input.required<T[]>();
+  trackFn = input.required<(item: T) => unknown>();
+  itemTemplate = input.required<TemplateRef<{ $implicit: T }>>();
+}
+```
+
+### Generic Services
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class CrudService<T extends { id: string }> {
+  private readonly http = inject(HttpClient);
+  
+  constructor(private endpoint: string) {}
+  
+  getAll(): Observable<T[]> {
+    return this.http.get<T[]>(this.endpoint);
+  }
+  
+  getById(id: string): Observable<T> {
+    return this.http.get<T>(`${this.endpoint}/${id}`);
+  }
+  
+  create(item: Omit<T, 'id'>): Observable<T> {
+    return this.http.post<T>(this.endpoint, item);
+  }
+  
+  update(id: string, changes: Partial<T>): Observable<T> {
+    return this.http.patch<T>(`${this.endpoint}/${id}`, changes);
+  }
+  
+  delete(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.endpoint}/${id}`);
+  }
+}
+```
+
+### Generic Store Pattern
+
+```typescript
+interface EntityState<T> {
+  entities: T[];
+  selectedId: string | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
+function createEntityStore<T extends { id: string }>(name: string) {
+  const initialState: EntityState<T> = {
+    entities: [],
+    selectedId: null,
+    isLoading: false,
+    error: null
+  };
+  
+  return signalStore(
+    withState(initialState),
+    withComputed((store) => ({
+      selectedEntity: computed(() =>
+        store.entities().find(e => e.id === store.selectedId())
+      )
+    })),
+    withMethods((store) => ({
+      setEntities(entities: T[]) {
+        patchState(store, { entities, isLoading: false });
+      },
+      addEntity(entity: T) {
+        patchState(store, { entities: [...store.entities(), entity] });
+      },
+      updateEntity(id: string, changes: Partial<T>) {
+        patchState(store, {
+          entities: store.entities().map(e =>
+            e.id === id ? { ...e, ...changes } : e
+          )
+        });
+      }
+    }))
+  );
+}
+```
+
+## Const Assertions
+
+```typescript
+// Without const assertion - type is string[]
+const roles = ['admin', 'user', 'guest'];
+
+// With const assertion - type is readonly ['admin', 'user', 'guest']
+const roles = ['admin', 'user', 'guest'] as const;
+
+// Use with objects
+const config = {
+  apiUrl: 'https://api.example.com',
+  timeout: 5000,
+  retries: 3
+} as const;
+
+// Create type from const
+type Role = typeof roles[number];  // 'admin' | 'user' | 'guest'
+```
+
+## Enums vs Union Types
+
+```typescript
+// ❌ Avoid enums - they add runtime code
+enum Status {
+  Pending,
+  Active,
+  Completed
+}
+
+// ✅ Prefer const objects + union types
+const Status = {
+  Pending: 'pending',
+  Active: 'active',
+  Completed: 'completed'
+} as const;
+
+type Status = typeof Status[keyof typeof Status];
+// 'pending' | 'active' | 'completed'
+```
+
+## Function Overloads
+
+```typescript
+// Function overloads for different return types
+function parseValue(value: string, type: 'number'): number;
+function parseValue(value: string, type: 'boolean'): boolean;
+function parseValue(value: string, type: 'date'): Date;
+function parseValue(value: string, type: 'number' | 'boolean' | 'date') {
+  switch (type) {
+    case 'number':
+      return Number(value);
+    case 'boolean':
+      return value === 'true';
+    case 'date':
+      return new Date(value);
+  }
+}
+
+const num = parseValue('42', 'number');     // number
+const bool = parseValue('true', 'boolean');  // boolean
+const date = parseValue('2024-01-01', 'date'); // Date
+```
+
+## Assertion Functions
+
+```typescript
+function assertDefined<T>(
+  value: T | null | undefined,
+  message?: string
+): asserts value is T {
+  if (value === null || value === undefined) {
+    throw new Error(message ?? 'Value is not defined');
+  }
+}
+
+function assertIsUser(value: unknown): asserts value is User {
+  if (!isUser(value)) {
+    throw new Error('Value is not a User');
+  }
+}
+
+// Usage
+function processUser(maybeUser: User | null) {
+  assertDefined(maybeUser, 'User is required');
+  // TypeScript now knows maybeUser is User
+  console.log(maybeUser.name);
+}
+```
+
+## Interface vs Type
+
+```typescript
+// Use interface for objects that might be extended
+interface User {
+  id: string;
+  name: string;
+}
+
+interface Admin extends User {
+  permissions: string[];
+}
+
+// Use type for unions, intersections, and computed types
+type Status = 'pending' | 'active' | 'completed';
+type UserWithStatus = User & { status: Status };
+type UserKeys = keyof User;
+```
+
+## Strict Null Checks
+
+```typescript
+// With strictNullChecks, handle null/undefined explicitly
+interface User {
+  name: string;
+  email?: string;  // string | undefined
+}
+
+function sendEmail(user: User) {
+  // ❌ Error: Object is possibly undefined
+  console.log(user.email.toLowerCase());
+  
+  // ✅ Optional chaining
+  console.log(user.email?.toLowerCase());
+  
+  // ✅ Nullish coalescing
+  console.log(user.email ?? 'no email');
+  
+  // ✅ Guard clause
+  if (user.email) {
+    console.log(user.email.toLowerCase());
+  }
+}
+```
+
+## Index Signatures
+
+```typescript
+// Strict index access
+interface Config {
+  [key: string]: string | undefined;  // Explicit undefined
+}
+
+const config: Config = { apiUrl: 'https://api.example.com' };
+
+// With noUncheckedIndexedAccess
+const value = config['apiUrl'];  // string | undefined
+
+// Must check before using
+if (value !== undefined) {
+  console.log(value.toLowerCase());
+}
+```

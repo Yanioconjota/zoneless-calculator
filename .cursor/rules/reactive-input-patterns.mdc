@@ -1,0 +1,231 @@
+---
+description: Patterns for handling reactive inputs - debounce, throttle, distinctUntilChanged, combined filters
+globs: ["**/*.component.ts", "**/*.ts"]
+alwaysApply: true
+---
+
+# Reactive Input Patterns
+
+Handle user inputs and events reactively with appropriate timing controls for performance and UX.
+
+## Default Behavior
+
+### Debounce User Text Input
+
+Delay processing until user stops typing. Use for search, filters, and any text input that triggers expensive operations.
+
+```typescript
+// ✅ Default: Debounced search with immediate UI feedback
+export class SearchComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  
+  // Local signal for immediate UI feedback
+  searchInput = signal('');
+  
+  constructor() {
+    toObservable(this.searchInput).pipe(
+      debounceTime(300),
+      distinctUntilChanged(),
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(term => {
+      this.store.setSearchTerm(term);
+    });
+  }
+  
+  onInput(event: Event) {
+    const value = (event.target as HTMLInputElement).value;
+    this.searchInput.set(value);  // Immediate UI update
+  }
+}
+```
+
+### Throttle High-Frequency Events
+
+Limit execution rate for scroll, resize, and mouse move events.
+
+```typescript
+// ✅ Default: Throttled scroll handler
+export class InfiniteScrollDirective {
+  private readonly ngZone = inject(NgZone);
+  
+  constructor() {
+    this.ngZone.runOutsideAngular(() => {
+      fromEvent(window, 'scroll').pipe(
+        throttleTime(200),
+        takeUntilDestroyed()
+      ).subscribe(() => {
+        if (this.isNearBottom()) {
+          this.ngZone.run(() => this.loadMore.emit());
+        }
+      });
+    });
+  }
+}
+```
+
+## Rationale
+
+1. **Performance** - Prevents excessive API calls, re-renders, and computations.
+2. **UX** - Users see immediate feedback (local signal) while expensive operations are batched.
+3. **Resource efficiency** - Reduces server load and client processing.
+
+## Documented Exceptions
+
+### 1. No Debounce for Instant Filters (Client-Side Only)
+
+When filtering is purely client-side with small datasets, skip debounce for instant response.
+
+```typescript
+// ✅ Exception: Instant client-side filter (small dataset)
+export class SmallListComponent {
+  filterText = signal('');
+  
+  filteredItems = computed(() => {
+    const term = this.filterText().toLowerCase();
+    return this.items().filter(item => 
+      item.name.toLowerCase().includes(term)
+    );
+  });
+  
+  onFilter(event: Event) {
+    this.filterText.set((event.target as HTMLInputElement).value);
+    // No debounce - computed handles it efficiently
+  }
+}
+```
+
+**When to use:** Dataset under ~1000 items, no API calls, simple filter logic.
+
+### 2. No Debounce for Discrete Actions
+
+Button clicks, checkbox toggles, and select changes don't need debounce.
+
+```typescript
+// ✅ Exception: Discrete selection (no debounce needed)
+onStatusFilterChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value;
+  this.store.setFilter(value as StatusFilter);  // Immediate
+}
+```
+
+### 3. Longer Debounce for API-Heavy Operations
+
+Increase debounce time for expensive operations or rate-limited APIs.
+
+```typescript
+// ✅ Exception: Longer debounce for API search
+toObservable(this.searchInput).pipe(
+  debounceTime(500),  // 500ms for API calls (vs 300ms for local)
+  distinctUntilChanged(),
+  filter(term => term.length >= 3),  // Don't call API for short terms
+  switchMap(term => this.searchApi.search(term))
+).subscribe(results => this.results.set(results));
+```
+
+## Anti-Patterns
+
+```typescript
+// ❌ No debounce on API-triggering search
+onSearchInput(event: Event) {
+  const term = (event.target as HTMLInputElement).value;
+  this.api.search(term).subscribe();  // Fires on every keystroke!
+}
+
+// ❌ Debounce without distinctUntilChanged
+toObservable(this.input).pipe(
+  debounceTime(300)
+  // Missing distinctUntilChanged - fires even if value unchanged
+).subscribe(/* ... */);
+
+// ❌ Throttle on text input (loses characters)
+fromEvent(input, 'input').pipe(
+  throttleTime(300)  // Wrong: throttle drops events, use debounce
+).subscribe(/* ... */);
+
+// ❌ Running scroll handlers in Angular zone
+fromEvent(window, 'scroll').pipe(
+  throttleTime(100)
+).subscribe(() => {
+  // Triggers change detection on every throttled event!
+});
+```
+
+## Combined Filters Pattern
+
+When multiple filters must work together:
+
+```typescript
+// ✅ Combined filters with single computed
+export const ItemStore = signalStore(
+  withState({ items: [], statusFilter: 'all', searchTerm: '' }),
+  
+  withComputed((store) => ({
+    filteredItems: computed(() => {
+      let items = store.items();
+      
+      // Apply status filter
+      const status = store.statusFilter();
+      if (status !== 'all') {
+        items = items.filter(item => item.status === status);
+      }
+      
+      // Apply search filter
+      const term = store.searchTerm().toLowerCase().trim();
+      if (term.length >= 3) {
+        items = items.filter(item =>
+          item.name.toLowerCase().includes(term) ||
+          item.description.toLowerCase().includes(term)
+        );
+      }
+      
+      return items;
+    })
+  }))
+);
+```
+
+## Timing Guidelines
+
+| Scenario | Operator | Delay |
+|----------|----------|-------|
+| Text search (local) | `debounceTime` | 150-300ms |
+| Text search (API) | `debounceTime` | 300-500ms |
+| Autocomplete | `debounceTime` | 200-300ms |
+| Scroll events | `throttleTime` | 100-200ms |
+| Resize events | `debounceTime` | 150-250ms |
+| Mouse move | `throttleTime` | 16-50ms (frame rate) |
+
+## Complete Pattern: Debounced API Search
+
+```typescript
+export class SearchComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly searchService = inject(SearchService);
+  
+  searchInput = signal('');
+  results = signal<Result[]>([]);
+  isSearching = signal(false);
+  
+  constructor() {
+    toObservable(this.searchInput).pipe(
+      debounceTime(300),
+      distinctUntilChanged(),
+      tap(term => {
+        if (term.length >= 3) {
+          this.isSearching.set(true);
+        }
+      }),
+      filter(term => term.length >= 3),
+      switchMap(term => 
+        this.searchService.search(term).pipe(
+          catchError(() => of([]))  // Graceful error handling
+        )
+      ),
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(results => {
+      this.results.set(results);
+      this.isSearching.set(false);
+    });
+  }
+}
+```

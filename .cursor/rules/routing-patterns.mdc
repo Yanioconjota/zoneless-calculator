@@ -1,0 +1,503 @@
+---
+description: Angular routing patterns for navigation and route management
+globs: ["**/*.routes.ts", "**/app.config.ts", "**/*.guard.ts", "**/*.resolver.ts"]
+alwaysApply: true
+---
+
+# Routing Patterns
+
+Reference guide for Angular routing, guards, resolvers, and navigation.
+
+## Route Configuration
+
+### Basic Setup
+
+```typescript
+// app.routes.ts
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  { 
+    path: '', 
+    redirectTo: 'dashboard', 
+    pathMatch: 'full' 
+  },
+  {
+    path: 'dashboard',
+    loadComponent: () => import('./features/dashboard/dashboard.component')
+      .then(m => m.DashboardComponent),
+    title: 'Dashboard'
+  },
+  {
+    path: 'products',
+    loadChildren: () => import('./features/products/products.routes')
+      .then(m => m.PRODUCT_ROUTES)
+  },
+  {
+    path: '**',
+    loadComponent: () => import('./shared/components/not-found/not-found.component')
+      .then(m => m.NotFoundComponent)
+  }
+];
+```
+
+### App Configuration with Router
+
+```typescript
+// app.config.ts
+import { ApplicationConfig } from '@angular/core';
+import { 
+  provideRouter, 
+  withComponentInputBinding,
+  withViewTransitions,
+  withPreloading,
+  PreloadAllModules
+} from '@angular/router';
+import { routes } from './app.routes';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideRouter(
+      routes,
+      withComponentInputBinding(),     // Bind route params to inputs
+      withViewTransitions(),           // Enable view transitions API
+      withPreloading(PreloadAllModules) // Preload lazy routes
+    )
+  ]
+};
+```
+
+## Lazy Loading
+
+### Component Lazy Loading
+
+```typescript
+{
+  path: 'settings',
+  loadComponent: () => import('./features/settings/settings.component')
+    .then(m => m.SettingsComponent)
+}
+```
+
+### Feature Routes Lazy Loading
+
+```typescript
+// app.routes.ts
+{
+  path: 'admin',
+  loadChildren: () => import('./features/admin/admin.routes')
+    .then(m => m.ADMIN_ROUTES),
+  canActivate: [authGuard, adminGuard]
+}
+
+// features/admin/admin.routes.ts
+export const ADMIN_ROUTES: Routes = [
+  { 
+    path: '', 
+    component: AdminLayoutComponent,
+    children: [
+      { path: '', redirectTo: 'overview', pathMatch: 'full' },
+      { path: 'overview', loadComponent: () => import('./overview/overview.component') },
+      { path: 'users', loadComponent: () => import('./users/users.component') },
+      { path: 'settings', loadComponent: () => import('./settings/settings.component') }
+    ]
+  }
+];
+```
+
+## Route Parameters
+
+### With Component Input Binding
+
+```typescript
+// Route configuration
+{
+  path: 'products/:id',
+  loadComponent: () => import('./product-detail.component')
+}
+
+// Component - route params automatically bound to inputs
+@Component({...})
+export class ProductDetailComponent {
+  // Automatically receives :id from route
+  id = input.required<string>();
+  
+  // Also works with query params
+  tab = input<string>();  // ?tab=reviews
+  
+  private readonly store = inject(ProductStore);
+  
+  product = computed(() => 
+    this.store.products().find(p => p.id === this.id())
+  );
+}
+```
+
+### Manual Parameter Access
+
+```typescript
+@Component({...})
+export class ProductDetailComponent {
+  private readonly route = inject(ActivatedRoute);
+  private readonly store = inject(ProductStore);
+  
+  // Reactive parameter access
+  private id$ = this.route.paramMap.pipe(
+    map(params => params.get('id'))
+  );
+  
+  // Convert to signal if needed
+  id = toSignal(this.id$);
+}
+```
+
+## Route Guards (Functional)
+
+### Auth Guard
+
+```typescript
+// guards/auth.guard.ts
+import { inject } from '@angular/core';
+import { CanActivateFn, Router } from '@angular/router';
+import { AuthService } from '../services/auth.service';
+
+export const authGuard: CanActivateFn = (route, state) => {
+  const authService = inject(AuthService);
+  const router = inject(Router);
+  
+  if (authService.isAuthenticated()) {
+    return true;
+  }
+  
+  // Redirect to login with return URL
+  return router.createUrlTree(['/login'], {
+    queryParams: { returnUrl: state.url }
+  });
+};
+```
+
+### Role Guard
+
+```typescript
+// guards/role.guard.ts
+export const roleGuard = (allowedRoles: string[]): CanActivateFn => {
+  return (route, state) => {
+    const authService = inject(AuthService);
+    const router = inject(Router);
+    
+    const userRole = authService.currentUser()?.role;
+    
+    if (userRole && allowedRoles.includes(userRole)) {
+      return true;
+    }
+    
+    return router.createUrlTree(['/unauthorized']);
+  };
+};
+
+// Usage in routes
+{
+  path: 'admin',
+  loadChildren: () => import('./admin/admin.routes'),
+  canActivate: [authGuard, roleGuard(['admin', 'superadmin'])]
+}
+```
+
+### Can Deactivate Guard
+
+```typescript
+// guards/unsaved-changes.guard.ts
+export interface HasUnsavedChanges {
+  hasUnsavedChanges: () => boolean;
+}
+
+export const unsavedChangesGuard: CanDeactivateFn<HasUnsavedChanges> = (component) => {
+  if (component.hasUnsavedChanges()) {
+    return confirm('You have unsaved changes. Do you want to leave?');
+  }
+  return true;
+};
+
+// Component implementation
+@Component({...})
+export class EditFormComponent implements HasUnsavedChanges {
+  form = inject(FormBuilder).group({...});
+  
+  hasUnsavedChanges(): boolean {
+    return this.form.dirty;
+  }
+}
+```
+
+### Can Match Guard
+
+```typescript
+// Feature flag guard
+export const featureFlagGuard = (featureName: string): CanMatchFn => {
+  return (route, segments) => {
+    const featureService = inject(FeatureFlagService);
+    return featureService.isEnabled(featureName);
+  };
+};
+
+// Usage
+{
+  path: 'new-feature',
+  loadComponent: () => import('./new-feature.component'),
+  canMatch: [featureFlagGuard('newFeature')]
+}
+```
+
+## Route Resolvers
+
+### Data Resolver
+
+```typescript
+// resolvers/product.resolver.ts
+import { ResolveFn } from '@angular/router';
+import { inject } from '@angular/core';
+import { ProductService } from '../services/product.service';
+
+export const productResolver: ResolveFn<Product> = (route) => {
+  const productService = inject(ProductService);
+  const id = route.paramMap.get('id')!;
+  
+  return productService.getById(id);
+};
+
+// Route configuration
+{
+  path: 'products/:id',
+  loadComponent: () => import('./product-detail.component'),
+  resolve: { product: productResolver }
+}
+
+// Component
+@Component({...})
+export class ProductDetailComponent {
+  // Resolved data as input
+  product = input.required<Product>();
+}
+```
+
+### Multiple Resolvers
+
+```typescript
+{
+  path: 'dashboard',
+  loadComponent: () => import('./dashboard.component'),
+  resolve: {
+    user: userResolver,
+    stats: statsResolver,
+    notifications: notificationsResolver
+  }
+}
+```
+
+## Preloading Strategies
+
+### Built-in Strategies
+
+```typescript
+// Preload all modules after initial load
+provideRouter(routes, withPreloading(PreloadAllModules))
+
+// No preloading (default)
+provideRouter(routes, withPreloading(NoPreloading))
+```
+
+### Custom Preloading Strategy
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class SelectivePreloadingStrategy implements PreloadingStrategy {
+  preload(route: Route, load: () => Observable<any>): Observable<any> {
+    // Only preload routes with data.preload = true
+    if (route.data?.['preload']) {
+      return load();
+    }
+    return of(null);
+  }
+}
+
+// Route configuration
+{
+  path: 'frequently-used',
+  loadChildren: () => import('./feature/feature.routes'),
+  data: { preload: true }  // Will be preloaded
+}
+
+// App config
+provideRouter(routes, withPreloading(SelectivePreloadingStrategy))
+```
+
+## Navigation
+
+### Programmatic Navigation
+
+```typescript
+@Component({...})
+export class NavigationComponent {
+  private readonly router = inject(Router);
+  
+  // Simple navigation
+  goToProducts() {
+    this.router.navigate(['/products']);
+  }
+  
+  // With route params
+  goToProduct(id: string) {
+    this.router.navigate(['/products', id]);
+  }
+  
+  // With query params
+  goToProductsFiltered(category: string) {
+    this.router.navigate(['/products'], {
+      queryParams: { category, sort: 'price' }
+    });
+  }
+  
+  // Preserve query params
+  navigatePreservingQuery() {
+    this.router.navigate(['/other-route'], {
+      queryParamsHandling: 'preserve'
+    });
+  }
+  
+  // Relative navigation
+  goToChild() {
+    this.router.navigate(['child'], { relativeTo: this.route });
+  }
+  
+  // Replace history
+  replaceNavigation() {
+    this.router.navigate(['/new-route'], { replaceUrl: true });
+  }
+}
+```
+
+### Template Navigation
+
+```html
+<!-- Basic link -->
+<a routerLink="/products">Products</a>
+
+<!-- With params -->
+<a [routerLink]="['/products', product.id]">{{ product.name }}</a>
+
+<!-- With query params -->
+<a 
+  routerLink="/products"
+  [queryParams]="{ category: 'electronics', sort: 'price' }"
+>
+  Electronics
+</a>
+
+<!-- Active state styling -->
+<a 
+  routerLink="/dashboard"
+  routerLinkActive="active"
+  [routerLinkActiveOptions]="{ exact: true }"
+>
+  Dashboard
+</a>
+```
+
+## Route Events
+
+```typescript
+@Component({...})
+export class AppComponent {
+  private readonly router = inject(Router);
+  
+  isLoading = signal(false);
+  
+  constructor() {
+    this.router.events.pipe(
+      takeUntilDestroyed()
+    ).subscribe(event => {
+      if (event instanceof NavigationStart) {
+        this.isLoading.set(true);
+      }
+      if (event instanceof NavigationEnd || 
+          event instanceof NavigationCancel || 
+          event instanceof NavigationError) {
+        this.isLoading.set(false);
+      }
+    });
+  }
+}
+```
+
+## Layout Routes
+
+### With Layout Components
+
+```typescript
+export const routes: Routes = [
+  {
+    path: '',
+    component: MainLayoutComponent,  // Has header, sidebar, footer
+    children: [
+      { path: 'dashboard', loadComponent: () => import('./dashboard.component') },
+      { path: 'products', loadComponent: () => import('./products.component') }
+    ]
+  },
+  {
+    path: 'auth',
+    component: AuthLayoutComponent,  // Minimal layout
+    children: [
+      { path: 'login', loadComponent: () => import('./login.component') },
+      { path: 'register', loadComponent: () => import('./register.component') }
+    ]
+  }
+];
+```
+
+## Route Data & Metadata
+
+```typescript
+{
+  path: 'admin/users',
+  loadComponent: () => import('./admin-users.component'),
+  title: 'User Management',  // Sets document title
+  data: {
+    breadcrumb: 'Users',
+    permissions: ['admin.users.read'],
+    animation: 'fadeIn'
+  }
+}
+
+// Access in component
+@Component({...})
+export class AdminUsersComponent {
+  private readonly route = inject(ActivatedRoute);
+  
+  breadcrumb = this.route.snapshot.data['breadcrumb'];
+  permissions = this.route.snapshot.data['permissions'];
+}
+```
+
+## Title Strategy
+
+```typescript
+// Custom title strategy
+@Injectable({ providedIn: 'root' })
+export class TemplatePageTitleStrategy extends TitleStrategy {
+  private readonly title = inject(Title);
+  
+  override updateTitle(snapshot: RouterStateSnapshot): void {
+    const title = this.buildTitle(snapshot);
+    if (title) {
+      this.title.setTitle(`${title} | My App`);
+    } else {
+      this.title.setTitle('My App');
+    }
+  }
+}
+
+// Provide in app config
+providers: [
+  { provide: TitleStrategy, useClass: TemplatePageTitleStrategy }
+]
+```

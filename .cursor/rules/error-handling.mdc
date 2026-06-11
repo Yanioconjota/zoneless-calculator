@@ -1,0 +1,476 @@
+---
+description: Error handling and loading state patterns for robust applications
+globs: ["**/*.ts", "**/*.html"]
+alwaysApply: true
+---
+
+# Error Handling & Loading States
+
+Patterns for building resilient applications with clear user feedback.
+
+## State Pattern
+
+Every async operation should track loading and error states:
+
+```typescript
+interface AsyncState<T> {
+  data: T;
+  isLoading: boolean;
+  error: string | null;
+}
+
+// In store
+interface FeatureState {
+  items: Item[];
+  isLoading: boolean;
+  error: string | null;
+}
+```
+
+## Store Methods Pattern
+
+```typescript
+withMethods((store, apiService = inject(ApiService)) => ({
+  
+  async loadData() {
+    // 1. Set loading, clear previous error
+    patchState(store, { isLoading: true, error: null });
+    
+    try {
+      // 2. Perform async operation
+      const data = await firstValueFrom(apiService.getData());
+      
+      // 3. Success: update data, clear loading
+      patchState(store, { items: data, isLoading: false });
+      
+    } catch (error) {
+      // 4. Failure: set error, clear loading
+      patchState(store, { 
+        isLoading: false, 
+        error: this.getErrorMessage(error)
+      });
+    }
+  },
+  
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof HttpErrorResponse) {
+      return error.error?.message || `Server error: ${error.status}`;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return 'An unexpected error occurred';
+  }
+}))
+```
+
+## Template Pattern
+
+```html
+<!-- Standard loading/error/content pattern -->
+@if (store.isLoading()) {
+  <app-loading-skeleton />
+} @else if (store.error(); as error) {
+  <app-error-state 
+    [message]="error" 
+    (retry)="store.loadData()"
+  />
+} @else {
+  @if (store.hasItems()) {
+    @for (item of store.items(); track item.id) {
+      <app-item-card [item]="item" />
+    }
+  } @else {
+    <app-empty-state 
+      title="No items yet"
+      description="Create your first item to get started"
+      actionLabel="Create Item"
+      (action)="onCreate()"
+    />
+  }
+}
+```
+
+## HTTP Error Interceptor
+
+```typescript
+// core/interceptors/error.interceptor.ts
+import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
+import { inject } from '@angular/core';
+import { catchError, throwError } from 'rxjs';
+
+export const errorInterceptor: HttpInterceptorFn = (req, next) => {
+  const notificationService = inject(NotificationService);
+  
+  return next(req).pipe(
+    catchError((error: HttpErrorResponse) => {
+      let message = 'An error occurred';
+      let shouldNotify = true;
+      
+      switch (error.status) {
+        case 0:
+          message = 'Unable to connect to server. Check your internet connection.';
+          break;
+        case 400:
+          message = error.error?.message || 'Invalid request';
+          break;
+        case 401:
+          message = 'Session expired. Please log in again.';
+          break;
+        case 403:
+          message = 'You don\'t have permission to perform this action';
+          break;
+        case 404:
+          message = 'The requested resource was not found';
+          shouldNotify = false;  // Often handled by component
+          break;
+        case 422:
+          message = error.error?.message || 'Validation error';
+          break;
+        case 429:
+          message = 'Too many requests. Please wait a moment.';
+          break;
+        case 500:
+        case 502:
+        case 503:
+          message = 'Server error. Please try again later.';
+          break;
+        default:
+          message = error.error?.message || `Error: ${error.status}`;
+      }
+      
+      if (shouldNotify) {
+        notificationService.showError(message);
+      }
+      
+      console.error('HTTP Error:', error);
+      
+      return throwError(() => new Error(message));
+    })
+  );
+};
+```
+
+## Error Display Components
+
+### Inline Error Message
+
+```typescript
+@Component({
+  selector: 'app-error-message',
+  standalone: true,
+  template: `
+    <div 
+      class="error-message" 
+      role="alert" 
+      aria-live="assertive"
+    >
+      <svg class="error-icon" aria-hidden="true">...</svg>
+      <span class="error-text">{{ message() }}</span>
+      @if (dismissible()) {
+        <button 
+          type="button" 
+          aria-label="Dismiss error"
+          (click)="dismissed.emit()"
+        >
+          ×
+        </button>
+      }
+    </div>
+  `
+})
+export class ErrorMessageComponent {
+  message = input.required<string>();
+  dismissible = input(false);
+  dismissed = output<void>();
+}
+```
+
+### Error State (Full Section)
+
+```typescript
+@Component({
+  selector: 'app-error-state',
+  standalone: true,
+  template: `
+    <div class="error-state" role="alert">
+      <svg class="error-icon-large" aria-hidden="true">...</svg>
+      <h3>{{ title() }}</h3>
+      <p>{{ message() }}</p>
+      @if (retryable()) {
+        <button 
+          type="button" 
+          class="retry-button"
+          (click)="retry.emit()"
+        >
+          Try Again
+        </button>
+      }
+    </div>
+  `
+})
+export class ErrorStateComponent {
+  title = input('Something went wrong');
+  message = input.required<string>();
+  retryable = input(true);
+  retry = output<void>();
+}
+```
+
+## Form Validation Errors
+
+```html
+<form [formGroup]="form" (ngSubmit)="onSubmit()">
+  <div class="form-field">
+    <label for="email">Email *</label>
+    <input
+      id="email"
+      type="email"
+      formControlName="email"
+      [attr.aria-invalid]="isInvalid('email')"
+      [attr.aria-describedby]="getDescribedBy('email')"
+    />
+    
+    @if (isInvalid('email')) {
+      <span id="email-error" class="field-error" role="alert">
+        @switch (getFirstError('email')) {
+          @case ('required') { Email is required }
+          @case ('email') { Please enter a valid email }
+          @case ('taken') { This email is already registered }
+        }
+      </span>
+    }
+  </div>
+  
+  <!-- Form-level error -->
+  @if (submitError()) {
+    <app-error-message 
+      [message]="submitError()!" 
+      [dismissible]="true"
+      (dismissed)="clearSubmitError()"
+    />
+  }
+  
+  <button type="submit" [disabled]="form.invalid || isSubmitting()">
+    @if (isSubmitting()) {
+      Submitting...
+    } @else {
+      Submit
+    }
+  </button>
+</form>
+```
+
+```typescript
+export class FormComponent {
+  form = inject(FormBuilder).group({
+    email: ['', [Validators.required, Validators.email]]
+  });
+  
+  submitError = signal<string | null>(null);
+  isSubmitting = signal(false);
+  
+  isInvalid(field: string): boolean {
+    const control = this.form.get(field);
+    return !!(control?.invalid && control?.touched);
+  }
+  
+  getFirstError(field: string): string | null {
+    const errors = this.form.get(field)?.errors;
+    return errors ? Object.keys(errors)[0] : null;
+  }
+  
+  getDescribedBy(field: string): string | null {
+    return this.isInvalid(field) ? `${field}-error` : null;
+  }
+}
+```
+
+## Connection/Real-Time Error Handling
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class ConnectionService {
+  private reconnectAttempts = signal(0);
+  private readonly maxReconnectAttempts = 5;
+  
+  readonly isConnected = signal(false);
+  readonly connectionError = signal<string | null>(null);
+  
+  connect() {
+    this.connectionError.set(null);
+    // ... connection logic
+  }
+  
+  private handleDisconnect() {
+    this.isConnected.set(false);
+    
+    if (this.reconnectAttempts() < this.maxReconnectAttempts) {
+      const delay = this.getReconnectDelay();
+      this.reconnectAttempts.update(n => n + 1);
+      
+      setTimeout(() => this.connect(), delay);
+    } else {
+      this.connectionError.set(
+        'Connection lost. Please check your internet and refresh the page.'
+      );
+    }
+  }
+  
+  private getReconnectDelay(): number {
+    const attempt = this.reconnectAttempts();
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s (max)
+    return Math.min(1000 * Math.pow(2, attempt), 16000);
+  }
+  
+  resetReconnection() {
+    this.reconnectAttempts.set(0);
+    this.connectionError.set(null);
+  }
+}
+```
+
+## Loading States
+
+### Loading Button
+
+```typescript
+@Component({
+  selector: 'app-loading-button',
+  standalone: true,
+  imports: [LoadingSpinnerComponent],
+  template: `
+    <button 
+      [type]="type()"
+      [disabled]="loading() || disabled()"
+      [attr.aria-busy]="loading()"
+      [class.loading]="loading()"
+    >
+      @if (loading()) {
+        <app-loading-spinner [size]="'small'" aria-hidden="true" />
+        <span class="sr-only">{{ loadingText() }}</span>
+      } @else {
+        <ng-content />
+      }
+    </button>
+  `
+})
+export class LoadingButtonComponent {
+  type = input<'button' | 'submit'>('button');
+  loading = input(false);
+  disabled = input(false);
+  loadingText = input('Loading...');
+}
+```
+
+### Skeleton Loading
+
+```typescript
+@Component({
+  selector: 'app-skeleton',
+  standalone: true,
+  template: `
+    <div 
+      class="skeleton"
+      [class.skeleton--text]="variant() === 'text'"
+      [class.skeleton--circle]="variant() === 'circle'"
+      [class.skeleton--rect]="variant() === 'rect'"
+      [style.width]="width()"
+      [style.height]="height()"
+      aria-hidden="true"
+    ></div>
+  `
+})
+export class SkeletonComponent {
+  variant = input<'text' | 'circle' | 'rect'>('text');
+  width = input('100%');
+  height = input('1em');
+}
+```
+
+## Optimistic Updates with Rollback
+
+```typescript
+withMethods((store, api = inject(ApiService)) => ({
+  
+  async deleteItem(id: string) {
+    // Store current state for rollback
+    const previousItems = store.items();
+    
+    // Optimistic update
+    patchState(store, {
+      items: previousItems.filter(item => item.id !== id)
+    });
+    
+    try {
+      await firstValueFrom(api.delete(id));
+      // Success - optimistic update stands
+    } catch (error) {
+      // Rollback on failure
+      patchState(store, { 
+        items: previousItems,
+        error: 'Failed to delete item'
+      });
+      throw error;
+    }
+  },
+  
+  async updateItem(id: string, changes: Partial<Item>) {
+    const previousItems = store.items();
+    
+    // Optimistic update
+    patchState(store, {
+      items: previousItems.map(item =>
+        item.id === id ? { ...item, ...changes } : item
+      )
+    });
+    
+    try {
+      await firstValueFrom(api.update(id, changes));
+    } catch (error) {
+      patchState(store, { items: previousItems, error: 'Failed to update' });
+      throw error;
+    }
+  }
+}))
+```
+
+## Global Error Boundary
+
+```typescript
+// app.config.ts
+export const appConfig: ApplicationConfig = {
+  providers: [
+    {
+      provide: ErrorHandler,
+      useClass: GlobalErrorHandler
+    }
+  ]
+};
+
+// core/services/global-error-handler.ts
+@Injectable()
+export class GlobalErrorHandler implements ErrorHandler {
+  private readonly notificationService = inject(NotificationService);
+  private readonly loggingService = inject(LoggingService);
+  
+  handleError(error: unknown): void {
+    console.error('Unhandled error:', error);
+    
+    // Log to monitoring service
+    this.loggingService.logError(error);
+    
+    // Show user-friendly message
+    this.notificationService.showError(
+      'An unexpected error occurred. Please try again.'
+    );
+  }
+}
+```
+
+## Rationale
+
+1. **User confidence** - Clear loading and error states build trust
+2. **Recoverability** - Retry mechanisms and rollbacks prevent data loss
+3. **Debuggability** - Centralized error handling simplifies troubleshooting
+4. **Accessibility** - Role alerts ensure errors are announced to screen readers

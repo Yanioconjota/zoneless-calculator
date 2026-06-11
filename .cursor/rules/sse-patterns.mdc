@@ -1,0 +1,580 @@
+# Server-Sent Events (SSE) Patterns
+
+Patterns for implementing unidirectional server-to-client streaming in Angular applications.
+
+## Default Behavior
+
+### When to Use SSE
+
+Use SSE when:
+- Server pushes data to client (unidirectional)
+- Client doesn't need to send data through the same channel
+- You need automatic reconnection (native `EventSource`)
+- Text-based streaming (AI responses, logs, notifications)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    DECISION MATRIX                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Need bidirectional? ──► YES ──► WebSocket                      │
+│         │                                                       │
+│         NO                                                      │
+│         │                                                       │
+│  Server pushes data? ──► YES ──► SSE                            │
+│         │                                                       │
+│         NO                                                      │
+│         │                                                       │
+│  Need real-time? ──► YES ──► Polling (short interval)           │
+│         │                                                       │
+│         NO                                                      │
+│         │                                                       │
+│  ──► Standard HTTP request                                      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Use Fetch API, Not HttpClient
+
+Angular's `HttpClient` waits for the complete response. Use `Fetch API` for streaming.
+
+```typescript
+// ✅ Default: Fetch API with ReadableStream
+const response = await fetch(url, { signal: abortController.signal });
+const reader = response.body?.getReader();
+
+// ❌ Avoid: HttpClient (waits for full response)
+this.http.get(url)  // Cannot read chunks as they arrive
+```
+
+### Service Pattern: Local AbortController per Stream
+
+Each stream must have its own `AbortController`. Never share state across streams.
+
+```typescript
+// ✅ Default: AbortController local to each stream
+import { Observable, defer, from, EMPTY } from 'rxjs';
+import { catchError, finalize, takeWhile } from 'rxjs/operators';
+
+@Injectable({ providedIn: 'root' })
+export class SseStreamService {
+  
+  /**
+   * Creates a stream with automatic cleanup.
+   * AbortController is LOCAL - each call gets its own.
+   */
+  streamData(endpoint: string): Observable<StreamChunk> {
+    return defer(() => {
+      // ✅ AbortController created per-stream, not shared
+      const abortController = new AbortController();
+      
+      return from(this.createStream(endpoint, abortController.signal)).pipe(
+        takeWhile((chunk) => !chunk.done, true),
+        catchError((error) => {
+          if (error.name === 'AbortError') return EMPTY;
+          throw error;
+        }),
+        // ✅ Cleanup guaranteed on complete OR unsubscribe
+        finalize(() => abortController.abort())
+      );
+    });
+  }
+
+  /**
+   * Creates a stream with manual cancellation support.
+   * Returns both the Observable and a cancel function.
+   */
+  streamWithCancel(endpoint: string): StreamHandle {
+    const abortController = new AbortController();
+    
+    const stream$ = defer(() => 
+      from(this.createStream(endpoint, abortController.signal))
+    ).pipe(
+      takeWhile((chunk) => !chunk.done, true),
+      catchError((error) => {
+        if (error.name === 'AbortError') return EMPTY;
+        throw error;
+      }),
+      finalize(() => abortController.abort())
+    );
+    
+    return {
+      stream$,
+      cancel: () => abortController.abort()
+    };
+  }
+
+  private async *createStream(
+    endpoint: string, 
+    signal: AbortSignal
+  ): AsyncGenerator<StreamChunk> {
+    const response = await fetch(endpoint, { signal });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const result = this.parseSseLine(line);
+          if (result.type === 'chunk') {
+            yield result.data;
+          } else if (result.type === 'error') {
+            throw result.error;
+          }
+          // type === 'skip' → continue to next line
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /**
+   * Pure function that parses SSE lines.
+   * Returns a discriminated union - NEVER throws.
+   */
+  private parseSseLine(line: string): SseParseResult {
+    if (!line.startsWith('data: ')) {
+      return { type: 'skip' };
+    }
+
+    const jsonStr = line.slice(6).trim();
+    if (!jsonStr) {
+      return { type: 'skip' };
+    }
+
+    try {
+      const event: SseEvent = JSON.parse(jsonStr);
+
+      if (isSseError(event)) {
+        return { type: 'error', error: new Error(event.message) };
+      }
+
+      return { 
+        type: 'chunk', 
+        data: { chunk: event.chunk, done: event.done } 
+      };
+    } catch {
+      // Invalid JSON → skip, don't crash
+      return { type: 'skip' };
+    }
+  }
+}
+
+// Types
+interface StreamHandle {
+  stream$: Observable<StreamChunk>;
+  cancel: () => void;
+}
+
+type SseParseResult = 
+  | { type: 'skip' }
+  | { type: 'error'; error: Error }
+  | { type: 'chunk'; data: StreamChunk };
+```
+
+### Discriminated Unions for Event Types
+
+Use TypeScript discriminated unions to differentiate SSE event types.
+
+```typescript
+// ✅ Default: Discriminated union with type guards
+export interface SseDataEvent {
+  chunk: string;
+  done: boolean;
+  cached?: boolean;
+}
+
+export interface SseErrorEvent {
+  error: 'validation' | 'timeout' | 'internal';
+  message: string;
+}
+
+export type SseEvent = SseDataEvent | SseErrorEvent;
+
+// Type guard - pure function
+export function isSseError(event: SseEvent): event is SseErrorEvent {
+  return 'error' in event;
+}
+```
+
+### Store Integration with rxMethod
+
+Use `rxMethod` in Signal Store. Store holds the cancel function for manual cancellation.
+
+```typescript
+// ✅ Default: Store pattern for SSE with cancellation
+export const ChatStore = signalStore(
+  withState({
+    streamingChunks: [] as string[],
+    isStreaming: false,
+    streamError: null as string | null,
+    _cancelFn: null as (() => void) | null,  // Internal: cancel function
+  }),
+  
+  withComputed((store) => ({
+    streamingResponse: computed(() => store.streamingChunks().join('')),
+    canSendMessage: computed(() => !store.isStreaming()),
+  })),
+  
+  withMethods((store, sseService = inject(SseStreamService)) => ({
+    sendMessage: rxMethod<string>(
+      pipe(
+        tap(() => patchState(store, { 
+          isStreaming: true, 
+          streamingChunks: [],
+          streamError: null 
+        })),
+        switchMap((prompt) => {
+          // Get stream with cancel handle
+          const { stream$, cancel } = sseService.streamWithCancel(`/api/chat?prompt=${prompt}`);
+          
+          // Store cancel function for later use
+          patchState(store, { _cancelFn: cancel });
+          
+          return stream$.pipe(
+            tap((chunk) => {
+              if (chunk.chunk) {
+                patchState(store, {
+                  streamingChunks: [...store.streamingChunks(), chunk.chunk],
+                });
+              }
+            }),
+            tapResponse({
+              next: () => {},
+              error: (error: Error) => patchState(store, {
+                streamError: error.message,
+                isStreaming: false,
+                _cancelFn: null,
+              }),
+              complete: () => patchState(store, { 
+                isStreaming: false,
+                _cancelFn: null,
+              }),
+            })
+          );
+        })
+      )
+    ),
+    
+    cancelStream() {
+      const cancel = store._cancelFn();
+      if (cancel) {
+        cancel();
+        patchState(store, { 
+          isStreaming: false,
+          _cancelFn: null,
+        });
+      }
+    },
+  }))
+);
+```
+
+### NgZone Considerations
+
+Fetch API runs outside Angular's zone. For UI updates, ensure change detection triggers.
+
+```typescript
+// ✅ Default: Using signals automatically triggers change detection
+// Signals update synchronously, so NgZone is not needed
+
+// ⚠️ Exception: If using non-signal state, run in zone
+private readonly ngZone = inject(NgZone);
+
+this.sseService.streamData(url).subscribe((chunk) => {
+  this.ngZone.run(() => {
+    this.legacyState.push(chunk);  // Only needed for non-signal state
+  });
+});
+```
+
+## Rationale
+
+1. **Local AbortController** — Each stream owns its lifecycle; no race conditions with concurrent streams.
+2. **defer() + from(generator)** — Lazy initialization ensures AbortController is created at subscription time.
+3. **finalize() for cleanup** — Guarantees abort on complete, error, OR unsubscribe.
+4. **Discriminated unions in parser** — Pure function, no throws, consistent return contract.
+5. **StreamHandle pattern** — Explicit API for streams that need manual cancellation.
+
+## Documented Exceptions
+
+### 1. Native EventSource for Simple GET Streams
+
+Use native `EventSource` when:
+- Endpoint is GET-only
+- No custom headers needed
+- You want automatic reconnection
+
+```typescript
+// ✅ Exception: Native EventSource for simple streams
+// Note: We use new Observable() here because EventSource is event-based,
+// not async-iterable. This is the appropriate pattern for wrapping event emitters.
+streamNotifications(endpoint: string): Observable<Notification> {
+  return defer(() => {
+    const eventSource = new EventSource(endpoint);
+
+    return new Observable<Notification>((subscriber) => {
+      eventSource.onmessage = (event) => {
+        subscriber.next(JSON.parse(event.data));
+      };
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        subscriber.error(new Error('EventSource connection failed'));
+      };
+
+      // Cleanup on unsubscribe
+      return () => eventSource.close();
+    });
+  });
+}
+```
+
+**Why `new Observable()` is valid here:**
+- EventSource is an **event emitter**, not an async iterable
+- `new Observable()` is the correct pattern for wrapping event-based APIs
+- Contrast with Fetch API which IS async-iterable (use `from()` + generator)
+
+### 2. Multiple Concurrent Streams
+
+For apps with multiple simultaneous streams (multi-chat, dashboard feeds):
+
+```typescript
+// ✅ Exception: Managing multiple concurrent streams
+@Injectable({ providedIn: 'root' })
+export class MultiStreamService {
+  private readonly activeStreams = new Map<string, { cancel: () => void }>();
+
+  startStream(id: string, endpoint: string): Observable<StreamChunk> {
+    // Cancel existing stream with same ID
+    this.stopStream(id);
+
+    const abortController = new AbortController();
+    
+    this.activeStreams.set(id, { 
+      cancel: () => abortController.abort() 
+    });
+
+    return defer(() => from(this.createStream(endpoint, abortController.signal))).pipe(
+      finalize(() => this.activeStreams.delete(id))
+    );
+  }
+
+  stopStream(id: string): void {
+    this.activeStreams.get(id)?.cancel();
+    this.activeStreams.delete(id);
+  }
+
+  stopAllStreams(): void {
+    this.activeStreams.forEach(({ cancel }) => cancel());
+    this.activeStreams.clear();
+  }
+}
+```
+
+### 3. Retry with Exponential Backoff
+
+For streams that must stay connected (notifications, live data):
+
+```typescript
+// ✅ Exception: Auto-reconnect with backoff
+import { retry, timer } from 'rxjs';
+
+streamWithReconnect(endpoint: string): Observable<T> {
+  return this.streamData(endpoint).pipe(
+    retry({
+      count: 5,
+      delay: (error, retryCount) => {
+        const delayMs = Math.min(1000 * Math.pow(2, retryCount), 30000);
+        return timer(delayMs);
+      },
+    }),
+    catchError(() => EMPTY)  // Give up after max retries
+  );
+}
+```
+
+### 4. Timeout per Chunk
+
+For streams where silence indicates a problem:
+
+```typescript
+// ✅ Exception: Timeout between chunks
+import { timeout } from 'rxjs';
+
+streamWithTimeout(endpoint: string): Observable<T> {
+  return this.streamData(endpoint).pipe(
+    timeout({
+      each: 30000,  // 30s max between chunks
+      with: () => throwError(() => new Error('Stream timeout'))
+    })
+  );
+}
+```
+
+## Anti-Patterns
+
+```typescript
+// ❌ Shared AbortController as class property
+export class SseService {
+  private abortController: AbortController | null = null;  // WRONG: shared across calls
+  
+  streamData(): Observable<T> {
+    this.abortController = new AbortController();  // Overwrites previous!
+  }
+}
+
+// ❌ Using HttpClient for SSE
+this.http.get(url, { observe: 'events' })  // Still buffers!
+
+// ❌ Throwing from parser function
+parseSseLine(line: string): StreamChunk | null {
+  if (isSseError(event)) {
+    throw new Error(event.message);  // Breaks return contract
+  }
+}
+
+// ❌ Not handling AbortError
+catchError((error) => {
+  throw error;  // AbortError should complete, not error
+})
+
+// ❌ String concatenation in tap()
+tap((chunk) => {
+  this.response += chunk.text;  // Use computed() instead
+})
+
+// ❌ Missing cleanup in finalize()
+// If you create resources, clean them up
+
+// ❌ Ignoring partial lines in buffer
+const lines = buffer.split('\n');
+// Missing: buffer = lines.pop() || '';
+
+// ❌ Not handling concurrent streams
+// Single AbortController for multiple stream calls
+```
+
+## SSE Event Format Reference
+
+```
+Standard SSE format:
+─────────────────────────────────────
+data: {"chunk": "Hello", "done": false}
+
+data: {"chunk": " World", "done": true}
+
+(empty line separates events)
+─────────────────────────────────────
+
+With event types:
+─────────────────────────────────────
+event: message
+data: {"text": "Hello"}
+
+event: error
+data: {"message": "Something failed"}
+─────────────────────────────────────
+```
+
+## Testing SSE Services
+
+```typescript
+describe('SseStreamService', () => {
+  function createMockStream(events: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    let index = 0;
+
+    return new ReadableStream({
+      pull(controller) {
+        if (index < events.length) {
+          controller.enqueue(encoder.encode(events[index] + '\n'));
+          index++;
+        } else {
+          controller.close();
+        }
+      },
+    });
+  }
+
+  it('should emit chunks from SSE stream', (done) => {
+    const mockEvents = [
+      'data: {"chunk": "Hello", "done": false}',
+      'data: {"chunk": " World", "done": true}',
+    ];
+
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      body: createMockStream(mockEvents),
+    } as Response);
+
+    const chunks: StreamChunk[] = [];
+
+    service.streamData('/test').subscribe({
+      next: (chunk) => chunks.push(chunk),
+      complete: () => {
+        expect(chunks).toHaveLength(2);
+        expect(chunks[0].chunk).toBe('Hello');
+        done();
+      },
+    });
+  });
+
+  it('should cancel stream on unsubscribe', () => {
+    const abortSpy = jest.fn();
+    jest.spyOn(global, 'AbortController').mockImplementation(() => ({
+      signal: {} as AbortSignal,
+      abort: abortSpy,
+    }));
+
+    const subscription = service.streamData('/test').subscribe();
+    subscription.unsubscribe();
+
+    expect(abortSpy).toHaveBeenCalled();
+  });
+
+  it('should handle concurrent streams independently', (done) => {
+    // Each stream should have its own AbortController
+    const { stream$: stream1, cancel: cancel1 } = service.streamWithCancel('/a');
+    const { stream$: stream2, cancel: cancel2 } = service.streamWithCancel('/b');
+
+    // Cancelling stream1 should not affect stream2
+    cancel1();
+    
+    // stream2 should still work
+    stream2.subscribe({
+      next: (chunk) => expect(chunk).toBeDefined(),
+      complete: () => done(),
+    });
+  });
+});
+```
+
+## Comparison: SSE vs WebSocket vs Polling
+
+| Aspect | SSE | WebSocket | Polling |
+|--------|-----|-----------|---------|
+| Direction | Server → Client | Bidirectional | Client → Server |
+| Protocol | HTTP | WS | HTTP |
+| Auto-reconnect | ✅ (EventSource) | ❌ Manual | N/A |
+| Binary data | ❌ Text only | ✅ | ✅ |
+| Headers | Limited (EventSource) | Handshake only | ✅ Full |
+| Firewall-friendly | ✅ | Sometimes blocked | ✅ |
+| Use case | Notifications, AI chat | Chat, gaming | Legacy, simple |
+| Concurrent streams | ✅ With proper pattern | ✅ | ✅ |

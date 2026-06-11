@@ -1,0 +1,441 @@
+---
+description: Code quality tooling - ESLint, Prettier, pre-commit hooks, and consistent formatting
+globs: ["**/*.ts", "**/*.html", "**/*.json", ".eslintrc*", ".prettierrc*", "package.json"]
+alwaysApply: true
+---
+
+# Code Quality Tools
+
+Enforce consistent code style and catch errors early with automated linting and formatting.
+
+## Default Behavior
+
+### ESLint for Static Analysis
+
+Use ESLint with Angular-specific rules for catching errors, enforcing patterns, and maintaining code quality.
+
+```json
+// .eslintrc.json
+{
+  "root": true,
+  "ignorePatterns": ["projects/**/*"],
+  "overrides": [
+    {
+      "files": ["*.ts"],
+      "extends": [
+        "eslint:recommended",
+        "plugin:@typescript-eslint/recommended",
+        "plugin:@typescript-eslint/stylistic",
+        "plugin:@angular-eslint/recommended",
+        "plugin:@angular-eslint/template/process-inline-templates"
+      ],
+      "rules": {
+        "@angular-eslint/directive-selector": [
+          "error",
+          { "type": "attribute", "prefix": "app", "style": "camelCase" }
+        ],
+        "@angular-eslint/component-selector": [
+          "error",
+          { "type": "element", "prefix": "app", "style": "kebab-case" }
+        ],
+        "@typescript-eslint/no-unused-vars": [
+          "error",
+          { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
+        ],
+        "@typescript-eslint/explicit-function-return-type": "off",
+        "@typescript-eslint/no-explicit-any": "error",
+        "no-console": ["warn", { "allow": ["warn", "error"] }]
+      }
+    },
+    {
+      "files": ["*.html"],
+      "extends": [
+        "plugin:@angular-eslint/template/recommended",
+        "plugin:@angular-eslint/template/accessibility"
+      ],
+      "rules": {
+        "@angular-eslint/template/click-events-have-key-events": "error",
+        "@angular-eslint/template/interactive-supports-focus": "error"
+      }
+    }
+  ]
+}
+```
+
+### Prettier for Formatting
+
+Use Prettier for consistent code formatting. Do NOT use ESLint for formatting rules.
+
+```json
+// .prettierrc
+{
+  "singleQuote": true,
+  "trailingComma": "none",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "semi": true,
+  "bracketSpacing": true,
+  "arrowParens": "avoid",
+  "endOfLine": "lf",
+  "overrides": [
+    {
+      "files": "*.html",
+      "options": {
+        "parser": "angular"
+      }
+    }
+  ]
+}
+```
+
+```
+// .prettierignore
+dist/
+node_modules/
+coverage/
+.angular/
+*.min.js
+*.min.css
+package-lock.json
+```
+
+### Separate Concerns: Linting vs Formatting
+
+ESLint handles **code quality**, Prettier handles **code style**. Never mix them.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    CODE QUALITY (ESLint)                     │
+├─────────────────────────────────────────────────────────────┤
+│  ✓ Unused variables                                          │
+│  ✓ Type safety issues                                        │
+│  ✓ Potential bugs (no-explicit-any, no-unused-vars)          │
+│  ✓ Angular best practices (component selectors, lifecycle)   │
+│  ✓ Accessibility in templates                                │
+│  ✓ Import patterns and restrictions                          │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                    CODE STYLE (Prettier)                     │
+├─────────────────────────────────────────────────────────────┤
+│  ✓ Indentation (tabs vs spaces, tab width)                   │
+│  ✓ Quotes (single vs double)                                 │
+│  ✓ Semicolons                                                │
+│  ✓ Line length and wrapping                                  │
+│  ✓ Trailing commas                                           │
+│  ✓ Bracket spacing                                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Integration: ESLint + Prettier Without Conflicts
+
+Install `eslint-config-prettier` to disable ESLint rules that conflict with Prettier.
+
+```json
+// package.json - required dependencies
+{
+  "devDependencies": {
+    "@angular-eslint/builder": "^18.0.0",
+    "@angular-eslint/eslint-plugin": "^18.0.0",
+    "@angular-eslint/eslint-plugin-template": "^18.0.0",
+    "@angular-eslint/schematics": "^18.0.0",
+    "@angular-eslint/template-parser": "^18.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.2.0"
+  }
+}
+```
+
+```json
+// .eslintrc.json - add prettier at the END of extends
+{
+  "overrides": [
+    {
+      "files": ["*.ts"],
+      "extends": [
+        "eslint:recommended",
+        "plugin:@typescript-eslint/recommended",
+        "plugin:@angular-eslint/recommended",
+        "prettier"  // MUST be last - disables conflicting rules
+      ]
+    }
+  ]
+}
+```
+
+### NPM Scripts
+
+```json
+// package.json
+{
+  "scripts": {
+    "lint": "ng lint",
+    "lint:fix": "ng lint --fix",
+    "format": "prettier --write \"src/**/*.{ts,html,scss,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,html,scss,json}\"",
+    "code-quality": "npm run format && npm run lint:fix"
+  }
+}
+```
+
+| Script | Purpose | When to Use |
+|--------|---------|-------------|
+| `lint` | Check for code quality issues | CI/CD, before commits |
+| `lint:fix` | Auto-fix linting issues | Development |
+| `format` | Format all files with Prettier | Development, after major changes |
+| `format:check` | Check formatting without writing | CI/CD |
+| `code-quality` | Format + lint in one command | Before commits |
+
+### Pre-commit Hooks with Husky + lint-staged
+
+Automatically lint and format staged files before every commit.
+
+```bash
+# Install dependencies
+npm install --save-dev husky lint-staged
+npx husky init
+```
+
+```json
+// package.json
+{
+  "lint-staged": {
+    "*.{ts,html}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,scss,css,md}": [
+      "prettier --write"
+    ]
+  }
+}
+```
+
+```bash
+# .husky/pre-commit
+npx lint-staged
+```
+
+```
+Pre-commit workflow:
+┌─────────────────────────────────────────────────────────────┐
+│  git commit -m "feat: add user form"                        │
+│                        │                                     │
+│                        ▼                                     │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Husky triggers pre-commit hook                      │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                        │                                     │
+│                        ▼                                     │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  lint-staged runs on STAGED files only               │    │
+│  │  ├── ESLint --fix on *.ts, *.html                    │    │
+│  │  └── Prettier --write on all                         │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                        │                                     │
+│              ┌─────────┴─────────┐                           │
+│              ▼                   ▼                           │
+│         PASSED               FAILED                          │
+│              │                   │                           │
+│              ▼                   ▼                           │
+│        Commit proceeds     Commit blocked                    │
+│                            (fix issues first)                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Rationale
+
+1. **Consistency** - Every developer's code looks the same, reducing cognitive load in code reviews.
+2. **Early error detection** - Catch bugs and bad patterns before they reach code review or production.
+3. **Automated enforcement** - Rules run automatically, no manual review needed for style issues.
+4. **Team velocity** - No debates about formatting, Prettier decides.
+5. **Accessibility** - Angular ESLint template rules catch a11y issues in templates.
+
+## Documented Exceptions
+
+### 1. Disable Rules for Specific Lines
+
+When a rule doesn't apply to a specific case, disable it inline with a comment.
+
+```typescript
+// ✅ Exception: Disable for specific line with explanation
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Third-party API returns untyped data
+const response: any = await legacyApi.getData();
+
+// ✅ Exception: Disable for block
+/* eslint-disable no-console */
+console.log('Debug info for development');
+console.log('More debug info');
+/* eslint-enable no-console */
+```
+
+**Always include a comment explaining why the rule is disabled.**
+
+### 2. Skip Formatting for Generated Files
+
+Some files are auto-generated and shouldn't be formatted.
+
+```
+// .prettierignore
+# Generated files
+src/app/api/generated/**
+*.generated.ts
+
+# Build outputs
+dist/
+coverage/
+.angular/
+```
+
+### 3. Custom Rules per File Type
+
+Different rules may apply to test files vs production code.
+
+```json
+// .eslintrc.json
+{
+  "overrides": [
+    {
+      "files": ["*.spec.ts", "*.test.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",  // More lenient in tests
+        "no-console": "off"  // Allow console in tests
+      }
+    }
+  ]
+}
+```
+
+### 4. Skip Pre-commit Hooks Temporarily
+
+In emergencies, skip hooks with `--no-verify` (use sparingly).
+
+```bash
+# ✅ Exception: Emergency fix that needs immediate deployment
+git commit --no-verify -m "hotfix: critical production bug"
+
+# ❌ Never use as default workflow
+git commit --no-verify -m "feat: new feature"  # Bad habit
+```
+
+## Anti-Patterns
+
+```typescript
+// ❌ Using ESLint for formatting rules
+{
+  "rules": {
+    "indent": ["error", 2],      // Prettier handles this
+    "quotes": ["error", "single"], // Prettier handles this
+    "semi": ["error", "always"]   // Prettier handles this
+  }
+}
+
+// ❌ Disabling rules project-wide without reason
+{
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "off"  // Defeats the purpose
+  }
+}
+
+// ❌ Ignoring ESLint errors instead of fixing them
+// @ts-ignore
+// eslint-disable-next-line  // No explanation
+
+// ❌ Committing with --no-verify regularly
+git commit --no-verify -m "wip"  // Bypasses all quality gates
+
+// ❌ Mixing formatting tools
+// Using both Prettier AND ESLint formatting rules
+// Using both Prettier AND IDE auto-format with different settings
+```
+
+## Editor Integration
+
+### VS Code Settings
+
+```json
+// .vscode/settings.json
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.codeActionsOnSave": {
+      "source.fixAll.eslint": "explicit"
+    }
+  },
+  "[html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "eslint.validate": ["typescript", "html"]
+}
+```
+
+### Recommended Extensions
+
+```json
+// .vscode/extensions.json
+{
+  "recommendations": [
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "angular.ng-template"
+  ]
+}
+```
+
+## CI/CD Integration
+
+```yaml
+# .github/workflows/ci.yml
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - run: npm ci
+      
+      - name: Check formatting
+        run: npm run format:check
+      
+      - name: Run linter
+        run: npm run lint
+      
+      - name: Run tests
+        run: npm test -- --no-watch --code-coverage
+```
+
+## Complete Setup Checklist
+
+- [ ] ESLint installed with `@angular-eslint` packages
+- [ ] Prettier installed
+- [ ] `eslint-config-prettier` installed and added to extends (last position)
+- [ ] `.eslintrc.json` configured with Angular rules
+- [ ] `.prettierrc` configured with team preferences
+- [ ] `.prettierignore` excludes build outputs and generated files
+- [ ] NPM scripts added: `lint`, `lint:fix`, `format`, `format:check`
+- [ ] Husky and lint-staged installed
+- [ ] Pre-commit hook runs lint-staged
+- [ ] VS Code settings configured for format-on-save
+- [ ] CI/CD runs format check and lint
+
+## Quick Reference: Common ESLint Rules for Angular
+
+| Rule | Purpose |
+|------|---------|
+| `@angular-eslint/component-selector` | Enforce component selector naming |
+| `@angular-eslint/directive-selector` | Enforce directive selector naming |
+| `@angular-eslint/no-output-native` | Prevent outputs named like DOM events |
+| `@angular-eslint/use-lifecycle-interface` | Require lifecycle interface implementation |
+| `@angular-eslint/template/accessibility` | Catch a11y issues in templates |
+| `@typescript-eslint/no-explicit-any` | Prevent `any` type usage |
+| `@typescript-eslint/no-unused-vars` | Flag unused variables |
+| `no-console` | Warn/error on console.log usage |

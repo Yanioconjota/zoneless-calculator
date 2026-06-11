@@ -1,0 +1,619 @@
+---
+description: Testing strategy and patterns - what to test, where to test it, and practical examples
+globs: ["**/*.spec.ts", "**/*.test.ts"]
+alwaysApply: true
+---
+
+# Testing Patterns
+
+Test effectively by focusing on behavior, isolating concerns, and prioritizing business logic.
+
+## Default Behavior
+
+### Test-Aware Development (Not Strict TDD)
+
+Write working code first, then add tests for business logic immediately after.
+
+```
+Default workflow:
+1. Implement the feature (working code)
+2. Add tests for store/service logic
+3. Add tests for complex component behavior (if needed)
+4. Skip trivial UI rendering tests
+```
+
+```typescript
+// ✅ Default: Implement, then test business logic
+// Step 1: Write the store
+export const UserStore = signalStore(
+  withState({ users: [], filter: 'all' }),
+  withComputed((store) => ({
+    filteredUsers: computed(() => /* filtering logic */)
+  }))
+);
+
+// Step 2: Immediately write tests for the computed
+describe('UserStore - filteredUsers', () => {
+  it('should filter by status', () => {
+    // Test the business logic
+  });
+});
+```
+
+### When to Write Tests
+
+| Layer | Test? | Priority |
+|-------|-------|----------|
+| Store computed values | **Always** | Highest |
+| Store async methods | **Always** | High |
+| Service transformations | **Always** | High |
+| Container → Store wiring | When complex | Medium |
+| Presentational components | Outputs only | Low |
+| Simple UI rendering | **Skip** | None |
+
+### Test Business Logic at the Lowest Level
+
+Start with the code closest to your business rules - typically stores, services, and pure functions.
+
+```typescript
+// ✅ Default: Test store computed values directly
+describe('ItemStore - filtering', () => {
+  let store: InstanceType<typeof ItemStore>;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [ItemStore] });
+    store = TestBed.inject(ItemStore);
+    
+    patchState(store, {
+      items: [
+        { id: '1', name: 'Alpha', status: 'active' },
+        { id: '2', name: 'Beta', status: 'inactive' }
+      ]
+    });
+  });
+
+  it('should filter by status', () => {
+    store.setFilter('active');
+    expect(store.filteredItems().length).toBe(1);
+    expect(store.filteredItems()[0].name).toBe('Alpha');
+  });
+});
+```
+
+### Test Behavior, Not Implementation
+
+Tests should verify what code does, not how it does it.
+
+```typescript
+// ✅ Default: Test observable behavior
+it('should load users and update state', async () => {
+  await store.loadUsers();
+  
+  expect(store.users().length).toBeGreaterThan(0);
+  expect(store.isLoading()).toBe(false);
+  expect(store.error()).toBeNull();
+});
+
+// ❌ Avoid: Testing implementation details
+it('should call patchState with isLoading true', () => {
+  const patchStateSpy = jest.spyOn(/* ... */);
+  store.loadUsers();
+  expect(patchStateSpy).toHaveBeenCalledWith(/* ... */);
+});
+```
+
+### Isolate Dependencies with Mocks
+
+Test units in isolation by mocking external dependencies.
+
+```typescript
+// ✅ Default: Mock API service
+const mockApiService = {
+  getAll: jest.fn().mockReturnValue(of(mockUsers)),
+  create: jest.fn().mockReturnValue(of(mockUser)),
+  delete: jest.fn().mockReturnValue(of(void 0))
+};
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [
+      ItemStore,
+      { provide: ApiService, useValue: mockApiService }
+    ]
+  });
+});
+```
+
+## Rationale
+
+1. **Fast feedback** - Unit tests for business logic run in milliseconds.
+2. **Confidence** - Testing at the source catches bugs before they propagate.
+3. **Maintainability** - Tests don't break when implementation changes.
+4. **Documentation** - Tests describe expected behavior.
+
+## Documented Exceptions
+
+### 1. TDD for Complex Business Logic
+
+Use Test-Driven Development when requirements are clear and logic is complex.
+
+```typescript
+// ✅ Exception: TDD for complex validation rules
+// Step 1: Write the failing test FIRST
+describe('validateOrder', () => {
+  it('should reject orders with items exceeding stock', () => {
+    const order = { items: [{ productId: '1', quantity: 100 }] };
+    const stock = { '1': 50 };
+    
+    expect(validateOrder(order, stock)).toEqual({
+      valid: false,
+      errors: ['Item 1 exceeds available stock (50)']
+    });
+  });
+});
+
+// Step 2: Write minimal code to pass
+function validateOrder(order: Order, stock: Stock): ValidationResult {
+  // Implementation
+}
+```
+
+**Use TDD when:**
+- Requirements are well-defined
+- Logic has many edge cases (validation, calculations)
+- Fixing a bug (write failing test first)
+- Algorithm-heavy code
+
+**Don't use TDD when:**
+- Prototyping/exploring
+- Simple CRUD operations
+- Time-constrained (interviews)
+- UI layout/styling
+
+### 2. Integration Tests for Critical Flows
+
+Test the full flow when integration points are complex or error-prone.
+
+```typescript
+// ✅ Exception: Integration test for component + store
+describe('SearchFeature - integration', () => {
+  it('should debounce search and update results', fakeAsync(() => {
+    const fixture = TestBed.createComponent(SearchComponent);
+    fixture.detectChanges();
+    
+    const input = fixture.nativeElement.querySelector('input');
+    input.value = 'test';
+    input.dispatchEvent(new Event('input'));
+    
+    tick(100);  // Before debounce
+    expect(store.searchTerm()).toBe('');
+    
+    tick(200);  // After 300ms total
+    expect(store.searchTerm()).toBe('test');
+  }));
+});
+```
+
+### 2. Skip Testing Framework Code
+
+Don't test Angular's built-in functionality.
+
+```typescript
+// ❌ Unnecessary: Testing that @if works
+it('should show element when condition is true', () => {
+  component.showElement.set(true);
+  fixture.detectChanges();
+  expect(fixture.nativeElement.querySelector('.element')).toBeTruthy();
+});
+
+// ✅ Exception: Only test YOUR logic
+it('should set showElement to true when data loads', () => {
+  store.loadData();
+  expect(component.showElement()).toBe(true);
+});
+```
+
+### 3. Snapshot Tests for Complex UI (Use Sparingly)
+
+Snapshots can catch unintended changes but are brittle.
+
+```typescript
+// ✅ Exception: Snapshot for stable, complex output
+it('should render user card correctly', () => {
+  fixture.componentRef.setInput('user', mockUser);
+  fixture.detectChanges();
+  expect(fixture.nativeElement).toMatchSnapshot();
+});
+```
+
+**Use only when:** UI is stable and changes should be deliberate.
+
+## Anti-Patterns
+
+```typescript
+// ❌ Testing everything through the UI
+it('should filter users', () => {
+  const select = fixture.nativeElement.querySelector('select');
+  select.value = 'active';
+  select.dispatchEvent(new Event('change'));
+  fixture.detectChanges();
+  // Slow, brittle, tests multiple layers
+});
+
+// ❌ Testing private methods
+it('should format date correctly', () => {
+  expect(component['formatDate'](date)).toBe('...');
+});
+
+// ❌ Asserting on too many things
+it('should load and display users', () => {
+  expect(store.isLoading()).toBe(false);
+  expect(store.error()).toBeNull();
+  expect(store.users().length).toBe(5);
+  expect(store.users()[0].name).toBe('John');
+  expect(fixture.nativeElement.querySelectorAll('.user-card').length).toBe(5);
+  // Too much - split into focused tests
+});
+
+// ❌ Flaky async tests
+it('should complete async operation', (done) => {
+  store.loadData();
+  setTimeout(() => {
+    expect(store.data()).toBeTruthy();
+    done();
+  }, 1000);  // Arbitrary timeout - use fakeAsync instead
+});
+```
+
+## Component Testing
+
+### Setup with TestBed
+
+```typescript
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+
+describe('ProductCardComponent', () => {
+  let component: ProductCardComponent;
+  let fixture: ComponentFixture<ProductCardComponent>;
+  
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [ProductCardComponent],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting()
+      ]
+    }).compileComponents();
+    
+    fixture = TestBed.createComponent(ProductCardComponent);
+    component = fixture.componentInstance;
+  });
+  
+  it('should create', () => {
+    expect(component).toBeTruthy();
+  });
+});
+```
+
+### Testing Signal Inputs
+
+```typescript
+describe('UserCardComponent', () => {
+  let fixture: ComponentFixture<UserCardComponent>;
+
+  beforeEach(() => {
+    fixture = TestBed.createComponent(UserCardComponent);
+  });
+
+  it('should display user name', () => {
+    fixture.componentRef.setInput('user', { name: 'John', email: 'john@test.com' });
+    fixture.detectChanges();
+    
+    expect(fixture.nativeElement.textContent).toContain('John');
+  });
+
+  it('should emit delete event with user id', () => {
+    const user = { id: '123', name: 'John', email: 'john@test.com' };
+    fixture.componentRef.setInput('user', user);
+    fixture.detectChanges();
+    
+    const deleteSpy = jest.fn();
+    fixture.componentInstance.delete.subscribe(deleteSpy);
+    
+    fixture.nativeElement.querySelector('.delete-btn').click();
+    
+    expect(deleteSpy).toHaveBeenCalledWith('123');
+  });
+});
+```
+
+### Testing Outputs
+
+```typescript
+it('should emit addToCart when button clicked', () => {
+  const product = { id: '1', name: 'Test', price: 10 };
+  fixture.componentRef.setInput('product', product);
+  fixture.detectChanges();
+  
+  const addToCartSpy = jest.fn();
+  component.addToCart.subscribe(addToCartSpy);
+  
+  const button = fixture.nativeElement.querySelector('.add-to-cart-btn');
+  button.click();
+  
+  expect(addToCartSpy).toHaveBeenCalledWith(product);
+});
+```
+
+## Store Testing
+
+### Testing NgRx Signal Store
+
+```typescript
+describe('ProductStore', () => {
+  let store: InstanceType<typeof ProductStore>;
+  
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [ProductStore]
+    });
+    store = TestBed.inject(ProductStore);
+  });
+  
+  it('should have initial state', () => {
+    expect(store.products()).toEqual([]);
+    expect(store.isLoading()).toBe(false);
+    expect(store.error()).toBeNull();
+  });
+  
+  it('should add product', () => {
+    const product = { id: '1', name: 'Test', price: 10 };
+    
+    store.addProduct(product);
+    
+    expect(store.products()).toContain(product);
+    expect(store.products().length).toBe(1);
+  });
+  
+  it('should compute hasProducts correctly', () => {
+    expect(store.hasProducts()).toBe(false);
+    
+    store.addProduct({ id: '1', name: 'Test', price: 10 });
+    
+    expect(store.hasProducts()).toBe(true);
+  });
+});
+```
+
+### Testing Async Store Methods
+
+```typescript
+describe('UserStore - async operations', () => {
+  it('should handle load error', async () => {
+    mockApiService.getAll.mockReturnValue(
+      throwError(() => new Error('Network error'))
+    );
+    
+    await store.loadUsers().catch(() => {});
+    
+    expect(store.isLoading()).toBe(false);
+    expect(store.error()).toBe('Failed to load users');
+    expect(store.users()).toEqual([]);
+  });
+
+  it('should rollback optimistic delete on error', async () => {
+    const initialUsers = [{ id: '1', name: 'John' }];
+    patchState(store, { users: initialUsers });
+    
+    mockApiService.delete.mockReturnValue(
+      throwError(() => new Error('Delete failed'))
+    );
+    
+    await store.deleteUser('1').catch(() => {});
+    
+    expect(store.users()).toEqual(initialUsers);  // Rolled back
+    expect(store.error()).toBe('Failed to delete');
+  });
+});
+```
+
+## Service Testing
+
+### Testing HTTP Services
+
+```typescript
+describe('ProductService', () => {
+  let service: ProductService;
+  let httpMock: HttpTestingController;
+  
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        ProductService,
+        provideHttpClient(),
+        provideHttpClientTesting()
+      ]
+    });
+    service = TestBed.inject(ProductService);
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+  
+  afterEach(() => {
+    httpMock.verify();
+  });
+  
+  it('should fetch products', (done) => {
+    const mockProducts = [{ id: '1', name: 'Test' }];
+    
+    service.getProducts().subscribe(products => {
+      expect(products).toEqual(mockProducts);
+      done();
+    });
+    
+    const req = httpMock.expectOne('/api/products');
+    expect(req.request.method).toBe('GET');
+    req.flush(mockProducts);
+  });
+});
+```
+
+## Testing Async Operations
+
+### Using fakeAsync
+
+```typescript
+import { fakeAsync, tick, flush } from '@angular/core/testing';
+
+describe('SearchComponent', () => {
+  it('should debounce search input', fakeAsync(() => {
+    const searchSpy = jest.spyOn(component, 'performSearch');
+    
+    component.onSearchInput('test');
+    expect(searchSpy).not.toHaveBeenCalled();
+    
+    tick(299);  // Just before debounce time
+    expect(searchSpy).not.toHaveBeenCalled();
+    
+    tick(1);    // Complete debounce time (300ms)
+    expect(searchSpy).toHaveBeenCalledWith('test');
+  }));
+  
+  it('should wait for all async operations', fakeAsync(() => {
+    component.loadData();
+    
+    flush();  // Complete all pending async operations
+    
+    expect(component.data()).toBeTruthy();
+  }));
+});
+```
+
+## Test Organization
+
+```typescript
+describe('FeatureStore', () => {
+  describe('computed values', () => {
+    it('should compute filtered items', () => {});
+    it('should compute item count', () => {});
+  });
+
+  describe('sync methods', () => {
+    it('should select item', () => {});
+    it('should set filter', () => {});
+  });
+
+  describe('async methods', () => {
+    describe('loadItems', () => {
+      it('should load items successfully', () => {});
+      it('should handle load error', () => {});
+    });
+    
+    describe('deleteItem', () => {
+      it('should delete optimistically', () => {});
+      it('should rollback on error', () => {});
+    });
+  });
+});
+```
+
+## Priority Guidelines
+
+| Priority | What to Test | Why |
+|----------|--------------|-----|
+| 1 | Store computed values | Core business logic, pure functions |
+| 2 | Store methods (sync & async) | State transitions, error handling |
+| 3 | Service transformations | Data mapping, validation |
+| 4 | Container-Store wiring | Events trigger correct methods |
+| 5 | Presentational components | Inputs render, outputs emit |
+| 6 | Edge cases in UI | Empty states, error states |
+
+## Coverage Guidance
+
+- **Aim for:** High coverage on business logic (stores, services)
+- **Accept:** Lower coverage on UI components (focus on behavior tests)
+- **Avoid:** 100% coverage as a goal (diminishing returns)
+- **Measure:** Coverage of branches in computed values and conditionals
+
+## Interview Testing Strategy
+
+When time is limited, prioritize demonstrating testing knowledge over coverage.
+
+```
+45-minute interview breakdown:
+├── Minutes 0-35:  Build working feature
+├── Minutes 35-40: Add 2-3 store/service tests
+└── Minutes 40-45: Discuss "I would also test X, Y, Z"
+```
+
+### Minimum Viable Tests (Time-Constrained)
+
+```typescript
+// If you only have 5 minutes for tests, write these:
+
+// 1. Test a computed value
+it('should filter users by status', () => {
+  patchState(store, { users: mockUsers, filter: 'active' });
+  expect(store.filteredUsers().length).toBe(2);
+});
+
+// 2. Test error handling
+it('should handle load error', async () => {
+  mockApi.getAll.mockReturnValue(throwError(() => new Error()));
+  await store.load().catch(() => {});
+  expect(store.error()).toBeTruthy();
+});
+
+// 3. Mention what else you'd test
+// "Given more time, I'd add tests for:
+//  - Optimistic delete rollback
+//  - Debounced search timing
+//  - Empty state rendering"
+```
+
+### What Interviewers Look For
+
+| Signal | What It Shows |
+|--------|---------------|
+| Tests business logic first | You understand testing priorities |
+| Uses mocks correctly | You can isolate units |
+| Tests error paths | You think about edge cases |
+| Mentions untested areas | You know what's missing |
+| Doesn't over-test UI | You're pragmatic |
+
+## Test Utilities
+
+```typescript
+// test-utils.ts
+export function createMockProduct(overrides: Partial<Product> = {}): Product {
+  return {
+    id: crypto.randomUUID(),
+    name: 'Test Product',
+    price: 99.99,
+    ...overrides
+  };
+}
+
+export function getByTestId(fixture: ComponentFixture<any>, testId: string) {
+  return fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+}
+```
+
+## Accessibility Testing
+
+```typescript
+import { axe, toHaveNoViolations } from 'jest-axe';
+
+expect.extend(toHaveNoViolations);
+
+describe('Accessibility', () => {
+  it('should have no accessibility violations', async () => {
+    fixture.detectChanges();
+    
+    const results = await axe(fixture.nativeElement);
+    
+    expect(results).toHaveNoViolations();
+  });
+});
+```

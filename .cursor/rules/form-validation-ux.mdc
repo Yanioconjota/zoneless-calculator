@@ -1,0 +1,263 @@
+---
+description: Form validation patterns for good UX - timing, thresholds, feedback, and accessibility
+globs: ["**/*.component.ts", "**/*.component.html", "**/form*.ts"]
+alwaysApply: true
+---
+
+# Form Validation UX
+
+Create forms that guide users with timely, accessible feedback without being intrusive.
+
+## Default Behavior
+
+### Validate on Blur, Show Errors on Touch
+
+Don't show errors while the user is still typing. Wait until they leave the field.
+
+```typescript
+// ✅ Default: Show error only when touched and invalid
+isInvalid(field: string): boolean {
+  const control = this.form.get(field);
+  return !!(control?.invalid && control?.touched);
+}
+```
+
+```html
+<!-- ✅ Default: Conditional error display -->
+@if (isInvalid('email')) {
+  <span class="error" role="alert">
+    {{ getErrorMessage('email') }}
+  </span>
+}
+```
+
+### Minimum Character Threshold for Search/Filter
+
+Don't trigger search until the user has typed enough characters to produce meaningful results.
+
+```typescript
+// ✅ Default: 3-character minimum for search
+searchHint = computed(() => {
+  const term = store.searchTerm().trim();
+  if (term.length > 0 && term.length < 3) {
+    return `Type ${3 - term.length} more character${3 - term.length > 1 ? 's' : ''} to search`;
+  }
+  return null;
+});
+
+filteredItems = computed(() => {
+  const term = store.searchTerm().toLowerCase().trim();
+  if (term.length < 3) return store.items();  // Don't filter yet
+  // ... apply filter
+});
+```
+
+### Accessible Error Messages
+
+Link errors to inputs with ARIA attributes.
+
+```html
+<!-- ✅ Default: Accessible form field -->
+<div class="form-field">
+  <label for="email">
+    Email <span aria-hidden="true">*</span>
+  </label>
+  <input
+    id="email"
+    type="email"
+    formControlName="email"
+    [attr.aria-invalid]="isInvalid('email')"
+    [attr.aria-describedby]="isInvalid('email') ? 'email-error' : null"
+  />
+  @if (isInvalid('email')) {
+    <span id="email-error" class="error" role="alert">
+      {{ getErrorMessage('email') }}
+    </span>
+  }
+</div>
+```
+
+## Rationale
+
+1. **Reduced frustration** - Users aren't interrupted while typing.
+2. **Clear feedback** - Errors appear at the right moment (after interaction).
+3. **Accessibility** - Screen readers announce errors via `role="alert"` and `aria-describedby`.
+4. **Performance** - Minimum character thresholds prevent unnecessary processing.
+
+## Documented Exceptions
+
+### 1. Real-Time Validation for Specific Fields
+
+Show validation status as user types for fields where immediate feedback is valuable.
+
+```typescript
+// ✅ Exception: Real-time password strength
+passwordStrength = computed(() => {
+  const password = this.form.get('password')?.value || '';
+  if (password.length === 0) return null;
+  if (password.length < 8) return 'weak';
+  if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) return 'medium';
+  return 'strong';
+});
+```
+
+```html
+<!-- ✅ Exception: Show strength while typing -->
+@if (passwordStrength(); as strength) {
+  <div class="password-strength" [class]="strength" aria-live="polite">
+    Password strength: {{ strength }}
+  </div>
+}
+```
+
+### 2. Availability Check with Debounce
+
+For username/email uniqueness, validate against API but with debounce.
+
+```typescript
+// ✅ Exception: Async availability check
+ngOnInit() {
+  this.form.get('username')?.valueChanges.pipe(
+    debounceTime(500),
+    distinctUntilChanged(),
+    filter(value => value.length >= 3),
+    switchMap(username => this.userService.checkAvailability(username)),
+    takeUntilDestroyed(this.destroyRef)
+  ).subscribe(isAvailable => {
+    if (!isAvailable) {
+      this.form.get('username')?.setErrors({ taken: true });
+    }
+  });
+}
+```
+
+### 3. Lower Threshold for Specific Searches
+
+Some searches work well with fewer characters (e.g., initials, short codes).
+
+```typescript
+// ✅ Exception: 2-character minimum for short identifiers
+const MIN_SEARCH_LENGTH = searchType === 'employeeId' ? 2 : 3;
+```
+
+### 4. Instant Validation on Submit Attempt
+
+Mark all fields as touched and show all errors when user tries to submit invalid form.
+
+```typescript
+// ✅ Exception: Show all errors on submit attempt
+onSubmit() {
+  if (this.form.invalid) {
+    this.form.markAllAsTouched();  // Reveals all errors
+    return;
+  }
+  // ... proceed with submission
+}
+```
+
+## Anti-Patterns
+
+```typescript
+// ❌ Show errors while user is still typing
+isInvalid(field: string): boolean {
+  return !!this.form.get(field)?.invalid;  // Missing && touched
+}
+
+// ❌ No minimum threshold for search
+filteredItems = computed(() => {
+  const term = store.searchTerm();
+  if (term) {  // Single character triggers filter!
+    return items.filter(/* ... */);
+  }
+});
+
+// ❌ Missing ARIA attributes
+<input type="email" formControlName="email" />
+@if (emailInvalid) {
+  <span class="error">Invalid email</span>  // Not linked to input!
+}
+
+// ❌ Generic error messages
+<span class="error">This field is invalid</span>
+
+// ❌ No feedback on character threshold
+// User types "jo" and nothing happens - confusing!
+```
+
+## Error Message Patterns
+
+```typescript
+// ✅ Specific, actionable error messages
+getErrorMessage(field: string): string {
+  const control = this.form.get(field);
+  if (!control?.errors) return '';
+  
+  const errors = control.errors;
+  const fieldName = this.getFieldLabel(field);
+  
+  if (errors['required']) return `${fieldName} is required`;
+  if (errors['email']) return 'Please enter a valid email address';
+  if (errors['minlength']) {
+    const min = errors['minlength'].requiredLength;
+    return `${fieldName} must be at least ${min} characters`;
+  }
+  if (errors['maxlength']) {
+    const max = errors['maxlength'].requiredLength;
+    return `${fieldName} must be no more than ${max} characters`;
+  }
+  if (errors['pattern']) return `${fieldName} format is invalid`;
+  if (errors['taken']) return `This ${fieldName.toLowerCase()} is already in use`;
+  
+  return `${fieldName} is invalid`;
+}
+```
+
+## Loading States in Forms
+
+```html
+<!-- ✅ Submit button with loading state -->
+<button 
+  type="submit" 
+  [disabled]="form.invalid || isSubmitting()"
+  [attr.aria-busy]="isSubmitting()"
+>
+  @if (isSubmitting()) {
+    <span class="spinner" aria-hidden="true"></span>
+    Saving...
+  } @else {
+    Save
+  }
+</button>
+```
+
+## Search Hint Pattern
+
+```html
+<!-- ✅ Guide user on minimum characters -->
+<div class="search-group">
+  <input
+    type="search"
+    placeholder="Search..."
+    [value]="searchInput()"
+    (input)="onSearchInput($event)"
+    [attr.aria-describedby]="store.searchHint() ? 'search-hint' : null"
+  />
+  @if (store.searchHint(); as hint) {
+    <span id="search-hint" class="search-hint" aria-live="polite">
+      {{ hint }}
+    </span>
+  }
+</div>
+```
+
+## Validation Timing Summary
+
+| Validation Type | When to Validate | When to Show Error |
+|-----------------|------------------|-------------------|
+| Required | On blur | After touch |
+| Format (email, phone) | On blur | After touch |
+| Min/Max length | On input (for counter) | After touch |
+| Password strength | On input | Always (as indicator) |
+| Async (availability) | On input, debounced | After API response |
+| Cross-field (confirm password) | On blur of either | After both touched |
+| All fields | On submit attempt | Immediately |

@@ -1,0 +1,134 @@
+---
+description: Ensure methods honor their return type contracts - no sync throws in async methods, consistent return shapes
+globs: ["**/*.ts"]
+alwaysApply: true
+---
+
+# Consistent Return Contracts
+
+Methods must honor their declared return type contracts. Callers rely on consistent behavior to handle responses and errors correctly.
+
+## Default Behavior
+
+### Async Methods Must Not Throw Synchronously
+
+Methods returning `Observable<T>` or `Promise<T>` must channel all errors through their async error path.
+
+```typescript
+// ✅ Default: Use throwError for Observable-returning methods
+getById(id: string): Observable<User> {
+  if (!id) {
+    return throwError(() => new Error('ID is required'));
+  }
+  return this.http.get<User>(`/api/users/${id}`);
+}
+
+// ✅ Default: Use Promise.reject for Promise-returning methods
+async getById(id: string): Promise<User> {
+  if (!id) {
+    return Promise.reject(new Error('ID is required'));
+  }
+  return this.fetchUser(id);
+}
+```
+
+### Consistent Return Shapes
+
+Methods should return consistent shapes - don't mix `T | undefined` with `T | null` across similar methods.
+
+```typescript
+// ✅ Consistent: All methods return null for "not found"
+interface UserService {
+  getById(id: string): Observable<User | null>;
+  getByEmail(email: string): Observable<User | null>;
+}
+
+// ❌ Inconsistent: Mixed undefined and null
+interface UserService {
+  getById(id: string): Observable<User | undefined>;
+  getByEmail(email: string): Observable<User | null>;
+}
+```
+
+## Rationale
+
+1. **Predictable error handling** - Callers expect to handle async errors in `.subscribe({ error })` or `.catch()`, not in try/catch around the call.
+2. **Composability** - Observables that throw synchronously break RxJS pipe chains.
+3. **Testability** - Consistent contracts make mocking straightforward.
+
+## Documented Exceptions
+
+### 1. Fail-Fast Constructor/Initialization Errors
+
+Services that cannot function without required configuration should throw synchronously during construction.
+
+```typescript
+// ✅ Exception: Constructor validation
+@Injectable({ providedIn: 'root' })
+export class ApiService {
+  constructor() {
+    const baseUrl = inject(API_BASE_URL, { optional: true });
+    if (!baseUrl) {
+      throw new Error('API_BASE_URL token must be provided');
+    }
+  }
+}
+```
+
+**Rationale:** The application should fail fast at startup rather than at runtime when the service is first used.
+
+### 2. Developer-Facing Assertion Errors
+
+Errors that indicate programming mistakes (not runtime conditions) may throw synchronously when they represent invariant violations.
+
+```typescript
+// ✅ Exception: Invariant violation (developer error)
+updateItem(id: string, changes: Partial<Item>): Observable<Item> {
+  if (Object.keys(changes).length === 0) {
+    throw new Error('updateItem called with empty changes - this is a bug');
+  }
+  return this.http.patch<Item>(`/api/items/${id}`, changes);
+}
+```
+
+**Rationale:** These errors should never occur in production; they signal bugs to fix during development.
+
+## Anti-Patterns
+
+```typescript
+// ❌ Synchronous throw in Observable method
+update(id: string, data: UpdateDto): Observable<Entity> {
+  const index = this.items.findIndex(i => i.id === id);
+  if (index === -1) {
+    throw new Error('Entity not found');  // Breaks Observable contract
+  }
+  return of(this.items[index]);
+}
+
+// ❌ Mixing return contracts in same service
+getUser(id: string): Observable<User | null> { }      // Returns null
+getProduct(id: string): Observable<Product | undefined> { } // Returns undefined
+
+// ❌ Returning different types based on condition
+getData(): Observable<Data[] | null> {
+  if (this.cache) {
+    return of(this.cache);  // Returns Data[]
+  }
+  return of(null);  // Returns null - callers must handle both
+}
+```
+
+## Validation Pattern
+
+When you need input validation in async methods:
+
+```typescript
+// ✅ Validate and return error through Observable
+create(data: CreateDto): Observable<Entity> {
+  const validationError = this.validate(data);
+  if (validationError) {
+    return throwError(() => new ValidationError(validationError));
+  }
+  return this.http.post<Entity>('/api/entities', data);
+}
+```

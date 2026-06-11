@@ -1,0 +1,357 @@
+---
+description: Styling conventions - design system usage, component selection, theming, and CSS patterns
+globs: ["**/*.component.ts", "**/*.component.html", "**/*.component.scss", "**/*.scss"]
+alwaysApply: true
+---
+
+# Styling Conventions
+
+Consistent styling through design system hierarchy and scoped CSS patterns.
+
+## Default Behavior
+
+### Design System Hierarchy
+
+Use this order when selecting UI components:
+
+```
+1. NgZorro (primary)     → Use for ALL standard UI components
+2. Angular Material      → ONLY when NgZorro lacks the component
+3. Bootstrap utilities   → ONLY for layout/spacing (not components)
+4. Custom CSS           → Last resort, scoped to component
+```
+
+### NgZorro First
+
+NgZorro is the default for all UI components.
+
+> **Locale requirement:** NgZorro defaults to `zh_CN`. Always register `provideNzI18n(en_US)` in `app.config.ts` or every popconfirm, modal, date picker, and pagination component will render labels in Chinese. See `angular-patterns.mdc` for the full setup snippet.
+
+```html
+<!-- ✅ Default: NgZorro components -->
+<button nz-button nzType="primary">Save</button>
+<nz-input-group>
+  <input nz-input placeholder="Search..." />
+</nz-input-group>
+<nz-table [nzData]="items()">...</nz-table>
+<nz-modal [(nzVisible)]="isOpen">...</nz-modal>
+<nz-select [(ngModel)]="selected">...</nz-select>
+<nz-date-picker [(ngModel)]="date"></nz-date-picker>
+
+<!-- ❌ Avoid: Material when NgZorro has equivalent -->
+<button mat-raised-button>Save</button>
+<mat-form-field><input matInput /></mat-form-field>
+```
+
+### Bootstrap for Layout Only
+
+Use Bootstrap utilities for spacing and layout, not components.
+
+```html
+<!-- ✅ Default: Bootstrap utilities for layout -->
+<div class="d-flex justify-content-between align-items-center gap-3">
+  <h2 class="mb-0">Title</h2>
+  <button nz-button>Action</button>  <!-- NgZorro component -->
+</div>
+
+<div class="row">
+  <div class="col-md-6">...</div>
+  <div class="col-md-6">...</div>
+</div>
+
+<!-- ❌ Avoid: Bootstrap components -->
+<button class="btn btn-primary">Save</button>
+<div class="card">...</div>
+```
+
+### Component-Scoped Styles
+
+Keep styles scoped to components using Angular's default encapsulation.
+
+```typescript
+// ✅ Default: Scoped styles (ViewEncapsulation.Emulated is default)
+@Component({
+  selector: 'app-user-card',
+  styleUrl: './user-card.component.scss'
+  // No need to specify ViewEncapsulation - Emulated is default
+})
+```
+
+```scss
+// user-card.component.scss
+// ✅ Default: Component-specific styles
+.user-card {
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius);
+}
+
+.user-card__avatar {
+  width: 48px;
+  height: 48px;
+}
+```
+
+### CSS Custom Properties for Theming
+
+Use CSS custom properties (design tokens) instead of hardcoded values.
+
+```scss
+// ✅ Default: Design tokens
+.card {
+  padding: var(--spacing-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-sm);
+}
+
+// ❌ Avoid: Hardcoded values
+.card {
+  padding: 16px;
+  background: #ffffff;
+  color: #333333;
+  border-radius: 8px;
+}
+```
+
+## Rationale
+
+1. **Visual consistency** - One design language throughout the app
+2. **Smaller bundle** - Don't ship multiple component libraries
+3. **Maintainability** - Change theme in one place, applies everywhere
+4. **Accessibility** - NgZorro handles a11y consistently across components
+5. **Developer experience** - Learn one API, use everywhere
+
+## Documented Exceptions
+
+### 1. Material When NgZorro Lacks Component
+
+Use Material only when NgZorro doesn't have an equivalent component.
+
+```typescript
+// ✅ Exception: Material Stepper (NgZorro's nz-steps has different UX)
+import { MatStepperModule } from '@angular/material/stepper';
+
+@Component({
+  imports: [MatStepperModule],
+  template: `
+    <!-- Document why Material is used -->
+    <!-- Using Material Stepper: NgZorro nz-steps doesn't support linear validation -->
+    <mat-stepper linear>
+      <mat-step [stepControl]="firstFormGroup">...</mat-step>
+    </mat-stepper>
+  `
+})
+```
+
+**Always document why** in a comment above the component.
+
+### 2. Global Styles for Design Tokens
+
+Define design tokens and resets in global stylesheets.
+
+```scss
+// styles/tokens.scss - ✅ Exception: Global design tokens
+:root {
+  // Spacing
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  // Colors (align with NgZorro theme)
+  --primary: #1890ff;
+  --success: #52c41a;
+  --warning: #faad14;
+  --error: #ff4d4f;
+  
+  // Surfaces
+  --bg-surface: #ffffff;
+  --bg-elevated: #fafafa;
+  --text-primary: rgba(0, 0, 0, 0.85);
+  --text-secondary: rgba(0, 0, 0, 0.45);
+  
+  // Effects
+  --border-radius: 6px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+// Dark theme
+[data-theme='dark'] {
+  --bg-surface: #141414;
+  --bg-elevated: #1f1f1f;
+  --text-primary: rgba(255, 255, 255, 0.85);
+  --text-secondary: rgba(255, 255, 255, 0.45);
+}
+```
+
+### 3. NgZorro Theme Overrides
+
+Override NgZorro's Less variables or use CSS custom properties.
+
+```scss
+// styles/ng-zorro-overrides.scss - ✅ Exception: DS customization
+// Override NgZorro CSS custom properties
+:root {
+  --ant-primary-color: #your-brand-color;
+  --ant-border-radius-base: 6px;
+}
+
+// Or target specific components
+.ant-btn-primary {
+  // Only override when brand requirements differ from defaults
+}
+```
+
+### 4. ::ng-deep for Third-Party Styling
+
+Use `::ng-deep` sparingly for third-party component overrides.
+
+```scss
+// ✅ Exception: Third-party component that can't be styled otherwise
+:host ::ng-deep {
+  .third-party-component {
+    // Document why ::ng-deep is necessary
+    // NgZorro modal content needs custom scrollbar
+    &::-webkit-scrollbar {
+      width: 8px;
+    }
+  }
+}
+```
+
+**Rules for ::ng-deep:**
+- Isolate in dedicated `_overrides.scss` files
+- Always scope with `:host`
+- Document why it's necessary
+- Prefer CSS custom properties or component APIs first
+
+### 5. ViewEncapsulation.None for Theme Files
+
+Only for global theme overrides that must pierce encapsulation.
+
+```typescript
+// ✅ Exception: Theme override component
+@Component({
+  selector: 'app-theme-overrides',
+  template: '',
+  styleUrl: './theme-overrides.scss',
+  encapsulation: ViewEncapsulation.None  // Document why
+})
+export class ThemeOverridesComponent {}
+```
+
+## Anti-Patterns
+
+```html
+<!-- ❌ Mixing design systems for same component type -->
+<button nz-button>NgZorro Button</button>
+<button mat-button>Material Button</button>  <!-- Same page! -->
+
+<!-- ❌ Bootstrap components (use NgZorro instead) -->
+<div class="card">
+  <div class="card-body">...</div>
+</div>
+
+<!-- ❌ Inline styles -->
+<div style="padding: 16px; margin-bottom: 20px;">
+
+<!-- ❌ Hardcoded colors -->
+<div class="header" style="background: #1890ff;">
+```
+
+```scss
+// ❌ !important to fight the design system
+.ant-btn {
+  background: red !important;
+  border-radius: 0 !important;
+}
+
+// ❌ Hardcoded values instead of tokens
+.container {
+  padding: 16px;
+  color: #333;
+}
+
+// ❌ Deeply nested selectors
+.page .content .card .header .title span {
+  font-size: 14px;
+}
+
+// ❌ Global styles in component files
+// (put in styles/ folder instead)
+body {
+  font-family: sans-serif;
+}
+```
+
+## File Organization
+
+```
+src/
+├── styles/
+│   ├── _tokens.scss         # Design tokens (CSS custom properties)
+│   ├── _reset.scss          # CSS reset/normalize
+│   ├── _typography.scss     # Global typography
+│   ├── _utilities.scss      # Custom utility classes (if needed)
+│   ├── _ng-zorro.scss       # NgZorro theme overrides
+│   └── styles.scss          # Main entry (imports all above)
+│
+├── app/
+│   └── features/
+│       └── users/
+│           └── components/
+│               └── user-card/
+│                   ├── user-card.component.ts
+│                   └── user-card.component.scss  # Scoped styles only
+```
+
+## NgZorro Component Quick Reference
+
+| Need | NgZorro Component |
+|------|-------------------|
+| Buttons | `nz-button` |
+| Forms | `nz-form`, `nz-input`, `nz-select`, `nz-checkbox`, `nz-radio` |
+| Data Display | `nz-table`, `nz-list`, `nz-card`, `nz-descriptions` |
+| Feedback | `nz-alert`, `nz-message`, `nz-notification`, `nz-modal` |
+| Navigation | `nz-menu`, `nz-tabs`, `nz-breadcrumb`, `nz-pagination` |
+| Data Entry | `nz-date-picker`, `nz-time-picker`, `nz-upload`, `nz-rate` |
+| Layout | `nz-layout`, `nz-grid` (or Bootstrap grid) |
+| Loading | `nz-spin`, `nz-skeleton` |
+
+## Responsive Patterns
+
+```scss
+// ✅ Use NgZorro's breakpoints (align with Bootstrap)
+// xs: <576px, sm: ≥576px, md: ≥768px, lg: ≥992px, xl: ≥1200px, xxl: ≥1600px
+
+// Mobile-first approach
+.card-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-md);
+  
+  @media (min-width: 768px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  @media (min-width: 1200px) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+```
+
+```html
+<!-- ✅ NgZorro responsive grid -->
+<div nz-row [nzGutter]="16">
+  <div nz-col [nzXs]="24" [nzSm]="12" [nzMd]="8">
+    <app-card />
+  </div>
+</div>
+
+<!-- ✅ Bootstrap responsive utilities -->
+<div class="d-none d-md-block">Desktop only</div>
+<div class="d-md-none">Mobile only</div>
+```
