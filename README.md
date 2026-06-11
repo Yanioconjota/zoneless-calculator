@@ -290,6 +290,70 @@ Esto elimina el import de `@HostBinding` por completo y garantiza que `w-1/4` y 
 
 ---
 
+### Servicios globales: `@Service()` vs `@Injectable()`
+
+#### Enfoque anterior (Angular ≤21)
+
+En versiones anteriores de Angular, para que un servicio fuera un **singleton global** (una única instancia compartida en toda la aplicación) era necesario usar `@Injectable` con la opción `providedIn: 'root'` de forma explícita:
+
+```typescript
+import { Injectable } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class CalculatorService { ... }
+```
+
+Sin el `providedIn: 'root'`, el servicio no se registraba en ningún injector y había que declararlo manualmente en el array `providers` de un módulo o componente.
+
+#### Enfoque moderno (Angular 22+)
+
+Angular 22 introduce el decorador `@Service()`, que **es global por defecto**. Ya no hace falta especificar `providedIn: 'root'`:
+
+```typescript
+import { Service, signal } from '@angular/core';
+
+@Service()
+export class CalculatorService {
+  resultText = signal('10');
+  subResultText = signal('20');
+  lastOperator = signal('+');
+}
+```
+
+`@Service()` sin parámetros equivale exactamente a `@Injectable({ providedIn: 'root' })`.
+
+#### Comparación
+
+```
+┌──────────────────────────────────────┬──────────────────────────┐
+│         Angular ≤21                  │       Angular 22+        │
+├──────────────────────────────────────┼──────────────────────────┤
+│ @Injectable({ providedIn: 'root' })  │ @Service()               │
+│ Global, singleton                    │ Global, singleton        │
+│ Requiere opción explícita            │ Por defecto              │
+└──────────────────────────────────────┴──────────────────────────┘
+```
+
+#### ¿Cuándo usar scope diferente?
+
+Si necesitás una instancia por componente en lugar de una global, podés optar por no registrarlo en root y declararlo en el componente:
+
+```typescript
+// Servicio sin scope global
+@Service({ providedIn: null })
+export class CalculatorService { ... }
+
+// Componente que provee su propia instancia
+@Component({
+  providers: [CalculatorService],
+})
+export class CalculatorComponent { ... }
+```
+
+> En este proyecto, `CalculatorService` usa `@Service()` sin parámetros, por lo que es un singleton accesible desde cualquier componente de la aplicación sin necesidad de declararlo en ningún `providers`.
+
+---
+
 ### Configuración del workspace (`.vscode/settings.json`)
 
 El archivo `.vscode/settings.json` en la **raíz del monorepo** contiene configuración compartida del editor para todos los proyectos en `angular-22-plus`.
