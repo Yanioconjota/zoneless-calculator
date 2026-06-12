@@ -17,6 +17,7 @@
 9. [Realizar cálculos y operaciones](#9-realizar-cálculos-y-operaciones)
 10. [Validaciones y consideraciones](#10-validaciones-y-consideraciones)
 11. [Conceptos complementarios](#11-conceptos-complementarios)
+12. [Testing con Vitest y TestBed](#12-testing-con-vitest-y-testbed)
 
 ---
 
@@ -864,6 +865,160 @@ En el template:
 <button [class.is-pressed]="isPressed()">
   <ng-content />
 </button>
+```
+
+---
+
+## 12. Testing con Vitest y TestBed
+
+### Herramientas
+
+Este proyecto usa **Vitest** como test runner (en lugar de Karma/Jasmine que era el default histórico de Angular). Vitest corre en Node.js usando **JSDOM** como DOM simulado — no necesita abrir un navegador real.
+
+```
+┌──────────────────────────────────────────────────────┐
+│               STACK DE TESTING                       │
+│                                                      │
+│  Vitest          → ejecuta los tests, reporta        │
+│  JSDOM           → simula el DOM del navegador       │
+│  @angular/core/testing → TestBed, ComponentFixture   │
+│  Expect / Matchers     → afirmaciones (assertions)   │
+└──────────────────────────────────────────────────────┘
+```
+
+### Anatomía de un archivo `.spec.ts`
+
+```typescript
+// src/app/app.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { App } from './app';
+
+// describe() agrupa tests relacionados bajo un nombre común
+describe('App', () => {
+
+  // beforeEach() corre ANTES de cada test del grupo
+  // Configura el módulo de testing con los componentes/imports necesarios
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [App],         // componente standalone se importa directamente
+    }).compileComponents();   // compila templates y estilos
+  });
+
+  // it() define un test individual
+  // Primer argumento: descripción legible de lo que se prueba
+  it('should create the app', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    expect(app).toBeTruthy(); // verifica que el componente se creó
+  });
+
+});
+```
+
+### `TestBed` — el entorno de testing de Angular
+
+`TestBed` es el equivalente de `AppModule` pero para tests: configura el injector, compila los componentes y provee el contexto necesario para que Angular funcione fuera del navegador.
+
+```
+TestBed.configureTestingModule({ imports, providers, declarations })
+  └─→ crea un NgModule de test en memoria
+
+TestBed.createComponent(MiComponente)
+  └─→ instancia el componente dentro de JSDOM
+  └─→ devuelve un ComponentFixture<MiComponente>
+```
+
+### `ComponentFixture` — el contenedor del componente en tests
+
+```
+fixture
+├── componentInstance   → la clase TypeScript (propiedades, métodos, signals)
+├── nativeElement       → elemento HTML raíz en el DOM simulado (JSDOM)
+├── debugElement        → wrapper Angular con helpers de query
+├── detectChanges()     → fuerza una ronda de detección de cambios
+└── whenStable()        → espera que terminen operaciones async (Promises, timers)
+```
+
+Ejemplo de uso:
+
+```typescript
+const fixture = TestBed.createComponent(App);
+const app     = fixture.componentInstance; // accede a la clase
+const html    = fixture.nativeElement as HTMLElement; // accede al DOM
+
+fixture.detectChanges(); // necesario para que los bindings se resuelvan
+
+expect(html.querySelector('h1')?.textContent).toContain('Hola');
+```
+
+### Tipos de test — de simple a complejo
+
+```
+┌─────────────────────┬──────────────────────────────────────────┐
+│ Tipo                │ Qué prueba                               │
+├─────────────────────┼──────────────────────────────────────────┤
+│ Sanity / Smoke      │ Que el entorno funciona (2 + 2 === 4)    │
+│ Unit (lógica pura)  │ Funciones, signals, servicios aislados   │
+│ Unit (componente)   │ Renderizado, bindings, outputs           │
+│ Integration         │ Componente + servicio juntos             │
+│ E2E                 │ Flujo completo en navegador real         │
+└─────────────────────┴──────────────────────────────────────────┘
+```
+
+### Test de Sanity/Smoke
+
+El test más simple posible: verifica que el entorno de testing y el motor de ejecución funcionan. No prueba lógica del componente — prueba que Vitest corre y que `expect()` funciona. Si este test falla, el problema está en la configuración del runner, no en el código de la app.
+
+### Matchers más comunes
+
+```typescript
+expect(valor).toBe(4);              // igualdad estricta ===
+expect(valor).toEqual({ a: 1 });    // igualdad profunda (objetos)
+expect(valor).toBeTruthy();         // cualquier valor truthy
+expect(valor).toBeFalsy();          // null, undefined, 0, ''
+expect(valor).toContain('texto');   // string o array contiene
+expect(valor).toBeNull();           // estrictamente null
+expect(fn).toThrow();               // la función lanza error
+expect(mockFn).toHaveBeenCalled();  // spy fue invocado
+```
+
+### Testing de Signals en servicios
+
+Con zoneless y Signals, los tests de servicios son simples — no necesitan `detectChanges()` para leer valores:
+
+```typescript
+it('should update resultText when a number is pressed', () => {
+  const service = TestBed.inject(CalculatorService);
+
+  service.constructNumber('5');
+
+  expect(service.resultText()).toBe('5'); // signal se lee directamente con ()
+});
+```
+
+### Ejemplo del proyecto — test existente
+
+```typescript
+// src/app/app.spec.ts
+describe('App', () => {
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [App],
+    }).compileComponents();
+  });
+
+  // Prueba de creación: el componente debe instanciarse sin errores
+  it('should create the app', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    expect(app).toBeTruthy();
+  });
+
+  // Prueba de sanity: verifica que el entorno de testing funciona
+  it('it should be 4', () => {
+    expect(2 + 2).toBe(4);
+  });
+});
 ```
 
 ---
