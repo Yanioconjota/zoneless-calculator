@@ -939,16 +939,53 @@ fixture
 └── whenStable()        → espera que terminen operaciones async (Promises, timers)
 ```
 
-Ejemplo de uso:
+### `fixture.nativeElement` — acceso al DOM renderizado
+
+`nativeElement` es el **elemento HTML raíz del componente** dentro del DOM simulado por JSDOM. Al castearlo a `HTMLElement` obtenemos acceso completo a la API estándar del DOM para verificar lo que el usuario vería en el navegador.
 
 ```typescript
-const fixture = TestBed.createComponent(App);
-const app     = fixture.componentInstance; // accede a la clase
-const html    = fixture.nativeElement as HTMLElement; // accede al DOM
+const compiled = fixture.nativeElement as HTMLElement;
 
-fixture.detectChanges(); // necesario para que los bindings se resuelvan
+// Leer texto renderizado
+compiled.querySelector('h1')?.textContent
 
-expect(html.querySelector('h1')?.textContent).toContain('Hola');
+// Verificar presencia de elementos
+compiled.querySelectorAll('button').length
+
+// Comprobar clases CSS aplicadas
+compiled.querySelector('.resultado')?.classList.contains('activo')
+
+// Leer atributos
+compiled.querySelector('input')?.getAttribute('placeholder')
+```
+
+**`componentInstance` vs `nativeElement`:**
+
+```
+┌───────────────────────┬──────────────────────────────────────────┐
+│ componentInstance     │ nativeElement                            │
+├───────────────────────┼──────────────────────────────────────────┤
+│ La clase TypeScript   │ El HTML resultante en el DOM             │
+│ Propiedades, signals  │ Elementos, texto, clases, atributos      │
+│ Lo que el dev escribió│ Lo que el usuario ve                     │
+│ app.title, app.count()│ compiled.querySelector('h1').textContent  │
+└───────────────────────┴──────────────────────────────────────────┘
+```
+
+Ejemplo completo:
+
+```typescript
+const fixture  = TestBed.createComponent(App);
+const app      = fixture.componentInstance; // clase TypeScript
+const compiled = fixture.nativeElement as HTMLElement; // HTML en JSDOM
+
+fixture.detectChanges(); // dispara bindings para que el DOM se actualice
+
+// Prueba de lógica (TypeScript)
+expect(app).toBeTruthy();
+
+// Prueba de renderizado (DOM)
+expect(compiled.querySelector('h1')?.textContent).toContain('Hola');
 ```
 
 ### Tipos de test — de simple a complejo
@@ -996,29 +1033,110 @@ it('should update resultText when a number is pressed', () => {
 });
 ```
 
-### Ejemplo del proyecto — test existente
+### Tests del proyecto (`app.spec.ts`)
+
+Los tests del componente raíz `App` cubren cuatro patrones distintos de verificación.
+
+#### 1. Creación del componente
+
+Verifica que el componente puede instanciarse sin errores. Es el test mínimo de cualquier componente.
 
 ```typescript
-// src/app/app.spec.ts
-describe('App', () => {
-  beforeEach(async () => {
-    await TestBed.configureTestingModule({
-      imports: [App],
-    }).compileComponents();
-  });
+it('should create the app', () => {
+  const fixture = TestBed.createComponent(App);
+  const app = fixture.componentInstance;
+  expect(app).toBeTruthy(); // la instancia existe y no es null/undefined
+});
+```
 
-  // Prueba de creación: el componente debe instanciarse sin errores
-  it('should create the app', () => {
-    const fixture = TestBed.createComponent(App);
-    const app = fixture.componentInstance;
-    expect(app).toBeTruthy();
-  });
+#### 2. Smoke test / Sanity
 
-  // Prueba de sanity: verifica que el entorno de testing funciona
-  it('it should be 4', () => {
-    expect(2 + 2).toBe(4);
+Verifica que el entorno de testing funciona. Si falla, el problema es el runner, no la app.
+
+```typescript
+it('it should be 4', () => {
+  expect(2 + 2).toBe(4);
+});
+```
+
+#### 3. Presencia de elemento en el DOM
+
+Verifica que un elemento HTML existe en el DOM renderizado usando `querySelector`.
+
+```typescript
+it('it should render router-outlet', () => {
+  const fixture = TestBed.createComponent(App);
+  const compiled = fixture.nativeElement as HTMLElement;
+
+  const routerOutlet = compiled.querySelector('router-outlet');
+  expect(routerOutlet).toBeTruthy(); // el elemento existe en el DOM
+});
+```
+
+#### 4. Clases CSS — comparación frágil vs robusta
+
+Verificar clases CSS tiene dos enfoques con distinta tolerancia al cambio de orden:
+
+**Frágil** — compara el string completo de `classList.value`. Si el orden de las clases cambia en el HTML, el test falla aunque todas las clases estén presentes.
+
+```typescript
+it('it should render router-outlet with css classes', () => {
+  const fixture = TestBed.createComponent(App);
+  const compiled = fixture.nativeElement as HTMLElement;
+  const div = compiled.querySelector('div');
+  const mustHaveClasses = 'min-w-screen min-h-screen bg-slate-600 flex items-center justify-center px-5 py-5';
+
+  // ⚠ Falla si el orden de clases en el HTML cambia
+  expect(div?.classList.value).toBe(mustHaveClasses);
+});
+```
+
+**Robusta** — convierte el string en array y verifica que cada clase esté presente individualmente. El orden no importa.
+
+```typescript
+it('it should render router-outlet with all css classes', () => {
+  const fixture = TestBed.createComponent(App);
+  const compiled = fixture.nativeElement as HTMLElement;
+  const div = compiled.querySelector('div');
+  const mustHaveClasses = 'min-w-screen min-h-screen bg-slate-600 flex items-center justify-center px-5 py-5'.split(' ');
+
+  // ✔ Resiste cambios de orden en el HTML
+  div?.classList.forEach(cls => {
+    expect(mustHaveClasses.includes(cls)).toBe(true);
   });
 });
+```
+
+#### 5. Atributos de elementos
+
+Verifica múltiples atributos de un mismo elemento con `getAttribute()`.
+
+```typescript
+it('it should render buy me a beer link with attributes', () => {
+  const fixture = TestBed.createComponent(App);
+  const compiled = fixture.nativeElement as HTMLElement;
+  const link = compiled.querySelector('a');
+
+  expect(link).toBeTruthy();
+  expect(link?.getAttribute('title')).toBe('Buy me a beer');
+  expect(link?.getAttribute('href')).toBe('https://www.buymeacoffee.com/scottwindon');
+  expect(link?.getAttribute('target')).toBe('_blank');
+});
+```
+
+#### Resumen de patrones
+
+```
+┌──────────────────────────────────┬───────────────────────────────────────┐
+│ Qué verificar                    │ Cómo                                  │
+├──────────────────────────────────┼───────────────────────────────────────┤
+│ Componente instanciado           │ expect(app).toBeTruthy()              │
+│ Elemento presente en DOM         │ expect(querySelector(...)).toBeTruthy()│
+│ Clases CSS (frágil)              │ classList.value === string completo    │
+│ Clases CSS (robusta)             │ classList.forEach + includes()        │
+│ Atributo de elemento             │ getAttribute('attr') === valor        │
+│ Texto renderizado                │ querySelector(...)?.textContent       │
+└──────────────────────────────────┴───────────────────────────────────────┘
 ```
 
 ---
