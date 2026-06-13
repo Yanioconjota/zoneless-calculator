@@ -1073,16 +1073,146 @@ describe('CalculatorService', () => {
 
 #### Testing de Signals en servicios
 
-Con zoneless y Signals, los tests de servicios son simples — no necesitan `detectChanges()` para leer valores:
+Con Zoneless y Signals, los tests de servicios son simples — no necesitan `detectChanges()` para leer valores. Los signals se leen llamándolos como funciones y se escriben directamente con `.set()`:
 
 ```typescript
 it('should update resultText when a number is pressed', () => {
-  const service = TestBed.inject(CalculatorService);
-
   service.constructNumber('5');
-
-  expect(service.resultText()).toBe('5'); // signal se lee directamente con ()
+  expect(service.resultText()).toBe('5'); // signal se lee con ()
 });
+
+// También podemos setear signals directamente en el Arrange sin simular
+// interacciones del usuario — ventaja clave de Signals en tests:
+service.resultText.set('123');
+service.lastOperator.set('-');
+```
+
+### Patrones de testing en el servicio (`calculator.service.spec.ts`)
+
+El suite del `CalculatorService` cubre 17 casos que ilustran patrones reutilizables.
+
+#### Patrón AAA — estructura recomendada
+
+Cada test sigue el patrón **Arrange → Act → Assert**, separado visualmente con líneas en blanco y comentarios:
+
+```typescript
+it('should set resultText to "0" when C is pressed', () => {
+  // Arrange: preparamos el estado inicial.
+  service.resultText.set('123');
+  service.lastOperator.set('-');
+
+  // Act: ejecutamos la acción bajo prueba.
+  service.constructNumber('C');
+
+  // Assert: verificamos el estado resultante.
+  expect(service.resultText()).toBe('0');
+  expect(service.lastOperator()).toBe('+');
+});
+```
+
+Cuando el Assert ocurre dentro del Act (estado que cambia paso a paso), se puede combinar Act + Assert:
+
+```typescript
+// Act + Assert combinados cuando verificamos estado intermedio
+service.constructNumber('+/-');
+expect(service.resultText()).toBe('-5');
+
+service.constructNumber('+/-');
+expect(service.resultText()).toBe('5');
+```
+
+#### Patrón forEach — probar múltiples valores sin repetir código
+
+Cuando el mismo comportamiento aplica a varios inputs, un `forEach` evita duplicar el test:
+
+```typescript
+it('should handle operators correctly', () => {
+  const operators = ['+', '-', '*', '/'];
+
+  operators.forEach(operator => {
+    // Arrange
+    service.resultText.set('12345');
+
+    // Act
+    service.constructNumber(operator);
+
+    // Assert: cada operador produce el mismo efecto estructural
+    expect(service.lastOperator()).toBe(operator);
+    expect(service.subResultText()).toBe('12345');
+    expect(service.resultText()).toBe('0');
+  });
+});
+```
+
+#### Patrón de flujo completo (end-to-end del servicio)
+
+Para operaciones que dependen de secuencia, se usa `constructNumber` tal como lo haría el usuario — en lugar de setear signals directamente — para probar el flujo completo:
+
+```typescript
+it('should calculate result correctly for addition', () => {
+  // Arrange
+  service.constructNumber('1');
+  service.constructNumber('+');
+  service.constructNumber('2');
+
+  // Act
+  service.constructNumber('=');
+
+  // Assert
+  expect(service.resultText()).toBe('3');
+});
+```
+
+#### Patrón de edge cases / validaciones
+
+Los tests de validación verifican que el servicio **no cambia** cuando recibe inputs límite:
+
+```typescript
+// Máximo de caracteres — resultText no crece más allá de 10
+it('should handle max length', () => {
+  service.resultText.set('1234567890'); // Arrange: display lleno
+  service.constructNumber('1');         // Act: agregar uno más
+  expect(service.resultText()).toBe('1234567890'); // Assert: sin cambio
+});
+
+// Input inválido — cualquier carácter fuera de las listas es ignorado
+it('should handle invalid input', () => {
+  service.constructNumber('a');         // Act
+  expect(service.resultText()).toBe('0'); // Assert: sin cambio
+});
+```
+
+#### Comportamiento de `parseFloat('-0')` en JavaScript
+
+Un edge case notable: `-0` en JavaScript al ser convertido con `parseFloat` y operado aritméticamente da `0`:
+
+```typescript
+it('should handle negative zero input correctly', () => {
+  service.constructNumber('0');
+  service.constructNumber('+/-'); // resultText = '-0'
+  service.constructNumber('=');   // parseFloat('-0') === 0 → 0 + 0 = 0
+  expect(service.resultText()).toBe('0');
+});
+```
+
+```
+parseFloat('-0') → 0  (no -0)
+String(-0)       → "0"
+-0 === 0         → true en JS
+```
+
+#### Resumen de patrones del servicio
+
+```
+┌───────────────────────────────────┬──────────────────────────────────────────┐
+│ Patrón                            │ Cuándo usarlo                            │
+├───────────────────────────────────┼──────────────────────────────────────────┤
+│ AAA con signal.set() en Arrange   │ Cuando el estado inicial es complejo     │
+│ AAA con constructNumber en Arrange│ Cuando importa el flujo de entrada       │
+│ forEach sobre casos similares     │ Mismo comportamiento con múltiples inputs│
+│ Act + Assert combinados           │ Estado que evoluciona paso a paso        │
+│ Assert sin cambio (edge case)     │ Validaciones que bloquean inputs         │
+└───────────────────────────────────┴──────────────────────────────────────────┘
 ```
 
 ### Tests del proyecto (`app.spec.ts`)
