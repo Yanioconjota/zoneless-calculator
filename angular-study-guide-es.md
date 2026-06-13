@@ -1019,7 +1019,59 @@ expect(fn).toThrow();               // la función lanza error
 expect(mockFn).toHaveBeenCalled();  // spy fue invocado
 ```
 
-### Testing de Signals en servicios
+### Boilerplate para testear un servicio (`calculator.service.spec.ts`)
+
+Testear un servicio es más simple que testear un componente: no hay DOM, no hay `fixture`, no hay `detectChanges()`. Solo se obtiene la instancia del servicio e se interactúa directamente con sus métodos y signals.
+
+#### Estructura del boilerplate
+
+```typescript
+// src/app/calculator/services/calculator.service.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { CalculatorService } from './calculator.service';
+
+describe('CalculatorService', () => {
+  // Variable accesible por todos los tests del bloque.
+  // Se declara fuera del beforeEach para que cada it() pueda usarla.
+  let service: CalculatorService;
+
+  // beforeEach garantiza que cada test arranca con una instancia
+  // limpia — sin estado residual del test anterior.
+  beforeEach(() => {
+    // Para servicios se usa providers[] en lugar de imports[].
+    // Aunque el servicio sea @Service() global, se registra aquí
+    // explícitamente para aislarlo en el entorno de test.
+    TestBed.configureTestingModule({
+      providers: [CalculatorService]
+    });
+
+    // TestBed.inject() obtiene la instancia del servicio del injector de test.
+    // Equivale a inject() pero usado fuera del contexto de un componente.
+    service = TestBed.inject(CalculatorService);
+  });
+
+  // Test mínimo de creación
+  it('it should be created', () => {
+    expect(service).toBeTruthy();
+  });
+});
+```
+
+#### Diferencia clave: componente vs servicio
+
+```
+┌────────────────────────────┬──────────────────────────────────────┐
+│ Test de COMPONENTE         │ Test de SERVICIO                     │
+├────────────────────────────┼──────────────────────────────────────┤
+│ imports: [MiComponente]    │ providers: [MiServicio]              │
+│ TestBed.createComponent()  │ TestBed.inject()                     │
+│ fixture.componentInstance  │ variable service directamente        │
+│ fixture.nativeElement      │ no aplica — no hay DOM               │
+│ fixture.detectChanges()    │ no necesario — no hay bindings       │
+└────────────────────────────┴──────────────────────────────────────┘
+```
+
+#### Testing de Signals en servicios
 
 Con zoneless y Signals, los tests de servicios son simples — no necesitan `detectChanges()` para leer valores:
 
