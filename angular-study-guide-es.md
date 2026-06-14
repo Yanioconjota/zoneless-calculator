@@ -1048,12 +1048,78 @@ describe('CalculatorService', () => {
     // TestBed.inject() obtiene la instancia del servicio del injector de test.
     // Equivale a inject() pero usado fuera del contexto de un componente.
     service = TestBed.inject(CalculatorService);
+
+    vi.resetAllMocks();
   });
 
   // Test mínimo de creación
   it('it should be created', () => {
     expect(service).toBeTruthy();
   });
+});
+```
+
+#### `beforeEach` — aislamiento entre tests
+
+`beforeEach` es una función de setup que se ejecuta **antes de cada test** (`it`) dentro del `describe`. Su propósito es garantizar que cada test arranca desde un estado limpio y conocido, sin contaminación del test anterior.
+
+```
+describe('CalculatorService', () => {
+  │
+  ├── beforeEach()  ← se ejecuta
+  ├── it('test 1')  ← corre en estado limpio
+  │
+  ├── beforeEach()  ← se ejecuta de nuevo
+  ├── it('test 2')  ← corre en estado limpio
+  │
+  ├── beforeEach()  ← se ejecuta de nuevo
+  └── it('test 3')  ← corre en estado limpio
+```
+
+Sin `beforeEach`, una instancia de servicio compartida acumularía estado entre tests — si el test 1 setea `resultText` a `'999'`, el test 2 empezaría con ese valor en lugar de `'0'`, produciendo falsos negativos o positivos difíciles de depurar.
+
+#### `vi.resetAllMocks()` vs `vi.clearAllMocks()`
+
+Vitest expone dos métodos para limpiar el estado de los spies/mocks entre tests. Son similares pero tienen alcances distintos:
+
+```
+┌────────────────────────┬──────────────────────────────────────────────────────┐
+│ Método                 │ Qué limpia                                           │
+├────────────────────────┼──────────────────────────────────────────────────────┤
+│ vi.clearAllMocks()     │ Historial de llamadas (calls, instances, results)    │
+│                        │ NO restaura mockImplementation ni mockReturnValue    │
+├────────────────────────┼──────────────────────────────────────────────────────┤
+│ vi.resetAllMocks()     │ Todo lo anterior + elimina mockImplementation        │
+│                        │ y mockReturnValue — el spy queda "vacío"             │
+└────────────────────────┴──────────────────────────────────────────────────────┘
+```
+
+En la práctica:
+
+```typescript
+// Test 1
+const spyLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+console.log('hola');
+// spyLog.mock.calls → [['hola']]
+
+// ─── beforeEach con clearAllMocks ───
+// spyLog.mock.calls    → []          ✔ historial limpiado
+// mockImplementation   → () => {}    ✘ sigue silenciando la consola
+
+// ─── beforeEach con resetAllMocks ───
+// spyLog.mock.calls    → []          ✔ historial limpiado
+// mockImplementation   → undefined   ✔ console.log vuelve a imprimir
+```
+
+**Regla práctica:** usar `resetAllMocks()` es más seguro. Garantiza que ningún mock del test anterior afecta al siguiente. `clearAllMocks()` es útil solo cuando se quiere preservar una implementación mock definida globalmente en `beforeAll`.
+
+En el proyecto se usa `resetAllMocks()` en `beforeEach` para que cada test que necesite espiar `console.log` configure su propio spy desde cero:
+
+```typescript
+beforeEach(() => {
+  TestBed.configureTestingModule({ providers: [CalculatorService] });
+  service = TestBed.inject(CalculatorService);
+  vi.resetAllMocks(); // limpia mocks e implementaciones del test anterior
 });
 ```
 
@@ -1182,6 +1248,52 @@ it('should handle invalid input', () => {
 });
 ```
 
+#### Patrón spy + mockImplementation — verificar efectos secundarios
+
+Algunos comportamientos del servicio producen efectos secundarios (como `console.log`) que no modifican el estado pero sí deben verificarse. Para eso se usa `vi.spyOn()` combinado con `mockImplementation`:
+
+```typescript
+it('should handle max length', () => {
+  // Arrange: espiar console.log y silenciarlo durante el test.
+  // vi.spyOn() intercepta las llamadas al método sin modificar su firma.
+  const spyLog = vi.spyOn(console, 'log');
+
+  // mockImplementation reemplaza la implementación real con una función
+  // vacía (no-op). Esto evita ruido en la terminal del runner.
+  // El spy sigue registrando todas las llamadas internamente.
+  spyLog.mockImplementation(() => {});
+
+  // Arrange: presionamos '1' veinte veces; solo 10 deben registrarse.
+  for (let i = 0; i < 20; i++) {
+    service.constructNumber('1');
+  }
+
+  // Assert 1: el display se detuvo en 10 caracteres.
+  expect(service.resultText()).toBe('1111111111');
+  // Assert 2: el servicio notificó el límite por consola.
+  expect(spyLog).toHaveBeenCalledWith('Max length reached');
+  // Assert 3: se notificó exactamente 10 veces (los 10 intentos extra).
+  expect(spyLog).toHaveBeenCalledTimes(10);
+});
+```
+
+Diagrama del flujo del spy:
+
+```
+                     ┌─────────────────────────────────────┐
+console.log real  →  │ imprime en terminal + spy registra  │
+                     └─────────────────────────────────────┘
+
+                     ┌─────────────────────────────────────┐
+console.log mock  →  │ no hace nada       + spy registra  │  ← lo que queremos
+                     └─────────────────────────────────────┘
+                                              ↓
+                              toHaveBeenCalledWith(...)  ✔
+                              toHaveBeenCalledTimes(...)  ✔
+```
+
+El `vi.resetAllMocks()` en `beforeEach` limpia el spy automáticamente antes de cada test, por lo que no es necesario restaurarlo manualmente.
+
 #### Comportamiento de `parseFloat('-0')` en JavaScript
 
 Un edge case notable: `-0` en JavaScript al ser convertido con `parseFloat` y operado aritméticamente da `0`:
@@ -1212,6 +1324,7 @@ String(-0)       → "0"
 │ forEach sobre casos similares     │ Mismo comportamiento con múltiples inputs│
 │ Act + Assert combinados           │ Estado que evoluciona paso a paso        │
 │ Assert sin cambio (edge case)     │ Validaciones que bloquean inputs         │
+│ spy + mockImplementation (no-op)  │ Verificar efectos secundarios sin ruido  │
 └───────────────────────────────────┴──────────────────────────────────────────┘
 ```
 

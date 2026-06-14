@@ -6,9 +6,12 @@ describe('CalculatorService', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [CalculatorService]
+      providers: [CalculatorService],
     });
     service = TestBed.inject(CalculatorService);
+
+    vi.resetAllMocks();
+    //vi.clearAllMocks();
   });
 
   it('it should be created', () => {
@@ -57,7 +60,7 @@ describe('CalculatorService', () => {
 
     // Usamos forEach para probar el mismo comportamiento con cada operador
     // sin duplicar el test cuatro veces. Cada iteración es un AAA completo.
-    operators.forEach(operator => {
+    operators.forEach((operator) => {
       // Arrange: establecemos un número en pantalla.
       service.resultText.set('12345');
 
@@ -203,17 +206,31 @@ describe('CalculatorService', () => {
   });
 
   it('should handle max length', () => {
-    // Arrange: el display ya está lleno (10 dígitos, el máximo permitido).
-    service.resultText.set('1234567890');
+    // Arrange: Espía el objeto console y el método log
+    const spyLog = vi.spyOn(console, 'log');
 
-    // Act: intentamos agregar un dígito más.
-    service.constructNumber('1');
+    // mockImplementation reemplaza la implementación real de console.log con una
+    // función vacía (no-op). Esto silencia la consola durante el test y evita ruido
+    // en la salida del runner. El spy sigue registrando todas las llamadas, lo que
+    // permite verificarlas después con toHaveBeenCalledWith y toHaveBeenCalledTimes.
+    spyLog.mockImplementation(() => {});
+
+    // Arrange: el display ya está lleno (10 dígitos, el máximo permitido).
+    for (let i = 0; i < 20; i++) {
+      service.constructNumber('1');
+    }
 
     // Assert: resultText no cambia — el límite de 10 caracteres se respeta.
-    expect(service.resultText()).toBe('1234567890');
+    expect(service.resultText()).toBe('1111111111');
+    // Assert: el método log debe haber sido llamado con el mensaje 'Max length reached'
+    expect(spyLog).toHaveBeenCalledWith('Max length reached');
+    // Assert: el método log debe haber sido llamado 10 veces
+    expect(spyLog).toHaveBeenCalledTimes(10);
   });
 
   it('should handle invalid input', () => {
+    // Arrange: Espía el objeto console y el método log
+    const spyLog = vi.spyOn(console, 'log');
     // Arrange: estado inicial con resultText = '0'.
 
     // Act: ingresamos un carácter que no es número, operador ni especial.
@@ -221,6 +238,10 @@ describe('CalculatorService', () => {
 
     // Assert: resultText no cambia — el input inválido es ignorado silenciosamente.
     expect(service.resultText()).toBe('0');
+    // Assert: el método log debe haber sido llamado con el mensaje 'Invalid input'
+    expect(spyLog).toHaveBeenCalledWith('Invalid input', 'a');
+    // Assert: el método log debe haber sido llamado 1 vez
+    expect(spyLog).toHaveBeenCalledTimes(1);
   });
 
   it('should handle negative zero input correctly', () => {
