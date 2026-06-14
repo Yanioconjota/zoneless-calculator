@@ -1,13 +1,9 @@
 import { ComponentFixture, TestBed } from "@angular/core/testing";
 import { CalculatorButtonComponent } from "./calculator-button.component";
 
-// CalculatorButtonComponent usa la propiedad `host` del decorador @Component para
-// aplicar clases al elemento raíz (<calculator-button>) en lugar del template interno.
-// En los tests, fixture.nativeElement apunta a ese elemento raíz (el host),
-// por lo que classList.value refleja directamente las clases definidas en `host: { ... }`.
+// fixture.nativeElement → host <calculator-button> (clases de `host: {}`)
+// querySelector('button') → <button> interno del template (otros bindings)
 describe('CalculatorButtonComponent', () => {
-  // fixture y component se declaran con `let` fuera del beforeEach para que sean
-  // visibles en todos los it(). El beforeEach los asigna antes de cada test.
   let component: CalculatorButtonComponent;
   let fixture: ComponentFixture<CalculatorButtonComponent>;
 
@@ -15,7 +11,6 @@ describe('CalculatorButtonComponent', () => {
     TestBed.configureTestingModule({
       imports: [CalculatorButtonComponent],
     });
-
     fixture = TestBed.createComponent(CalculatorButtonComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
@@ -26,40 +21,39 @@ describe('CalculatorButtonComponent', () => {
   });
 
   it('should apply w-1/4 double size is false', () => {
-    // Arrange: beforeEach ya creó el componente con isDoubleSize=false (valor por defecto).
-    // El host aplica 'w-1/4' cuando isDoubleSize() es false.
-
-    // Assert: verificamos la clase en el elemento host (fixture.nativeElement).
+    // host binding — clase en el elemento raíz, isDoubleSize=false por defecto
     const hostElement = fixture.nativeElement as HTMLElement;
-    const cssClasses = hostElement.classList.value;
-    expect(cssClasses).toContain('w-1/4');
+    expect(hostElement.classList.value).toContain('w-1/4');
   });
 
   it('should apply w-2/4 double size is true', () => {
-    // Act: setInput modifica el valor del input signal isDoubleSize en tiempo de test.
-    // Debe ir ANTES de leer el DOM para que detectChanges() re-evalúe el host.
+    // host binding — setInput antes de detectChanges para que el host se re-evalúe
     fixture.componentRef.setInput('isDoubleSize', true);
-    fixture.detectChanges(); // re-renderiza el host con el nuevo valor del signal
+    fixture.detectChanges();
 
-    // Assert: el host ahora debe tener 'w-2/4' en lugar de 'w-1/4'.
     const hostElement = fixture.nativeElement as HTMLElement;
-    const cssClasses = hostElement.classList.value;
-    expect(cssClasses).toContain('w-2/4');
+    expect(hostElement.classList.value).toContain('w-2/4');
   });
 
   it('should apply is-command class when isCommand is true', () => {
+    // is-command viene de [class.is-command]="isCommand()" en el <button> del template,
+    // no del `host: {}` del decorador → se busca con querySelector('button'), no en fixture.nativeElement
     fixture.componentRef.setInput('isCommand', true);
     fixture.detectChanges();
-    const hostElement = fixture.nativeElement as HTMLElement;
-    const cssClasses = hostElement.classList.value;
-    console.log(cssClasses);
-    expect(cssClasses).toContain('is-command');
+
+    const buttonElement = (fixture.nativeElement as HTMLElement).querySelector('button');
+    expect(buttonElement?.classList.contains('is-command')).toBe(true);
   });
 
   it('should emit onClick when handleClick is called', () => {
-    // todo:
-  });
+    // output test — spy en emit; textContent con espacios verifica que trim() se aplica
+    const spy = vi.spyOn(component.onClick, 'emit');
+    const buttonElement = (fixture.nativeElement as HTMLElement).querySelector('button');
+    buttonElement!.textContent = ' 7 ';
+    buttonElement?.click();
 
+    expect(spy).toHaveBeenCalledWith('7');
+  });
 
   it('should set isPressed to true and then false when keyboardPressedStyle is called with matching key', (done) => {
     // todo:

@@ -1452,6 +1452,64 @@ Orden INCORRECTO:
   4. expect(hostElement.classList...) ← sigue viendo el DOM viejo ✘
 ```
 
+#### Test de template binding — clase en el componente interno
+
+No todas las clases están en el `host`. Algunas se aplican dentro del template (en el `<button>` interno). Para verificarlas se usa `querySelector('button')`, no `fixture.nativeElement`:
+
+```
+fixture.nativeElement                    → <calculator-button class="border-r w-1/4">  ← HOST
+  └── querySelector('button')           → <button class="is-command is-pressed">       ← TEMPLATE
+```
+
+```typescript
+it('should apply is-command class when isCommand is true', () => {
+  // Diferencia clave: is-command está en el <button> del template (no en el host).
+  fixture.componentRef.setInput('isCommand', true);
+  fixture.detectChanges();
+
+  // Se busca en el elemento interno, no en fixture.nativeElement.
+  const buttonElement = (fixture.nativeElement as HTMLElement).querySelector('button');
+  expect(buttonElement?.classList.contains('is-command')).toBe(true);
+});
+```
+
+Regla práctica: si la clase viene de `host: { '[class.X]': ... }` → buscar en `fixture.nativeElement`. Si viene de un binding en el template (`[class.X]="..."`) → buscar con `querySelector`.
+
+#### Test de output — espiar la emisión de eventos
+
+Para verificar que un componente emite el valor correcto por su `output()` signal, se espía el método `emit` directamente con `vi.spyOn`:
+
+```typescript
+it('should emit onClick when handleClick is called', () => {
+  // Arrange: interceptamos el output sin necesitar un componente padre.
+  const spy = vi.spyOn(component.onClick, 'emit');
+
+  // Arrange: en tests de componente aislado no hay ng-content real,
+  // así que asignamos textContent directamente. Los espacios verifican el trim().
+  const buttonElement = (fixture.nativeElement as HTMLElement).querySelector('button');
+  buttonElement!.textContent = ' 7 ';
+
+  // Act: click nativo — dispara el evento (click) del template → handleClick()
+  buttonElement?.click();
+
+  // Assert: emit fue llamado con '7' (con trim aplicado, no ' 7 ').
+  expect(spy).toHaveBeenCalledWith('7');
+});
+```
+
+El flujo interno que este test verifica:
+
+```
+buttonElement.click()
+  → (click)="handleClick()"              [template binding]
+  → handleClick()
+  → textContent?.trim()                  ['7']
+  → this.onClick.emit('7')               [output()]
+  → spy.toHaveBeenCalledWith('7') ✔
+```
+
+**Por qué `vi.spyOn` en lugar de `subscribe`:** `output()` en Angular 17+ no es un `Observable` — es un `OutputRef`. No tiene `.subscribe()` en el sentido de RxJS. Espiar `emit` directamente es la forma más directa de verificar que el output fue activado con el valor correcto.
+
 #### Suite completa
 
 ```typescript
@@ -1470,19 +1528,51 @@ describe('CalculatorButtonComponent', () => {
     expect(component).toBeTruthy();
   });
 
+  // Test de host binding
   it('should apply w-1/4 when isDoubleSize is false (default)', () => {
-    // beforeEach ya crea el componente con isDoubleSize=false
     const hostElement = fixture.nativeElement as HTMLElement;
     expect(hostElement.classList.value).toContain('w-1/4');
   });
 
+  // Test de host binding con setInput
   it('should apply w-2/4 when isDoubleSize is true', () => {
     fixture.componentRef.setInput('isDoubleSize', true);
     fixture.detectChanges();
     const hostElement = fixture.nativeElement as HTMLElement;
     expect(hostElement.classList.value).toContain('w-2/4');
   });
+
+  // Test de template binding (clase en <button> interno, no en host)
+  it('should apply is-command class when isCommand is true', () => {
+    fixture.componentRef.setInput('isCommand', true);
+    fixture.detectChanges();
+    const buttonElement = (fixture.nativeElement as HTMLElement).querySelector('button');
+    expect(buttonElement?.classList.contains('is-command')).toBe(true);
+  });
+
+  // Test de output: verifica la emisión con el valor correcto
+  it('should emit onClick when handleClick is called', () => {
+    const spy = vi.spyOn(component.onClick, 'emit');
+    const buttonElement = (fixture.nativeElement as HTMLElement).querySelector('button');
+    buttonElement!.textContent = ' 7 '; // espacios para verificar trim()
+    buttonElement?.click();
+    expect(spy).toHaveBeenCalledWith('7');
+  });
 });
+```
+
+#### Resumen de tipos de test en componentes
+
+```
+┌────────────────────────┬────────────────────────────────────┬──────────────────────────────────┐
+│ Tipo                   │ Qué verifica                       │ Dónde buscar en el DOM           │
+├────────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
+│ Creación               │ El componente instancia sin error  │ component (instancia)            │
+│ Host binding           │ Clase/atrib en el elemento raíz    │ fixture.nativeElement            │
+│ Template binding       │ Clase/atrib en elemento del tmpl   │ .querySelector('selector')       │
+│ Output / emit          │ El evento se emite con valor correcto│ vi.spyOn(component.output,'emit')│
+│ Input + detectChanges  │ El componente reacciona al input   │ setInput() + detectChanges()     │
+└────────────────────────┴────────────────────────────────────┴──────────────────────────────────┘
 ```
 
 ---
