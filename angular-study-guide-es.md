@@ -320,7 +320,7 @@ DOM resultante:
   },
 })
 export class CalculatorButtonComponent {
-  isDoubleSize = input(false, { transform: ... });
+  isDoubleSize = input(false, { transform: booleanAttribute });
 }
 ```
 
@@ -333,6 +333,57 @@ En el template padre:
 <!-- botón doble: w-2/4 (ej: tecla =) -->
 <calculator-button isDoubleSize>=</calculator-button>
 ```
+
+### `transform` en `input()` — normalización de valores
+
+`transform` es una función que Angular ejecuta automáticamente cada vez que el input recibe un valor, antes de almacenarlo en el signal. Actúa como una capa de normalización entre el template y la lógica del componente.
+
+**El problema que resuelve:**
+
+Los atributos HTML sin valor llegan como string vacío `""` en lugar de `true`:
+
+```
+// Template                              → valor recibido sin transform
+<calculator-button isDoubleSize>        →  ""      (string vacío, no boolean)
+<calculator-button [isDoubleSize]="true">  →  true
+<calculator-button [isDoubleSize]="false"> →  false
+```
+
+Sin normalización, `isDoubleSize()` devolvería `""` en el primer caso, rompiendo el binding condicional en `host`.
+
+**Solución con `transform` manual:**
+
+```typescript
+isDoubleSize = input(false, {
+  transform: (value: boolean | string) => (typeof value === 'string' ? value === '' : value),
+});
+// ""    → "" === ""  → true  ✔
+// true  → true       → true  ✔
+// false → false      → false ✔
+```
+
+**Solución con `booleanAttribute` (recomendada):**
+
+Angular provee `booleanAttribute` en `@angular/core` que hace exactamente lo mismo con menos código:
+
+```typescript
+import { input, booleanAttribute } from '@angular/core';
+
+isCommand    = input(false, { transform: booleanAttribute });
+isDoubleSize = input(false, { transform: booleanAttribute });
+```
+
+```
+┌─────────────────────────────────┬────────────────────────────────────────────┐
+│ Forma                           │ Cuándo usar                                │
+├─────────────────────────────────┼────────────────────────────────────────────┤
+│ transform: booleanAttribute     │ Inputs que representan flags booleanos     │
+│ transform: numberAttribute      │ Inputs que deben recibir un número         │
+│ transform: función propia       │ Normalización personalizada (trim, parse…) │
+└─────────────────────────────────┴────────────────────────────────────────────┘
+```
+
+`numberAttribute` sigue el mismo principio para inputs numéricos: convierte el string `"10"` del template en el número `10`.
 
 ### Ejemplo del proyecto — evento en el host
 

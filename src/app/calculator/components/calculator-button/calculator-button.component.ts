@@ -16,6 +16,12 @@ export class CalculatorButtonComponent {
   onClick = output<string>();
   contentValue = viewChild<ElementRef<HTMLButtonElement>>('button')
   isPressed = signal(false);
+  // transform normaliza el valor antes de almacenarlo en el signal.
+  // Problema: un atributo HTML sin valor llega como string vacío "" en lugar de true.
+  //   <calculator-button isCommand>   → Angular entrega ""   (sin transform sería incorrecto)
+  //   <calculator-button [isCommand]="true"> → Angular entrega true
+  // transform unifica ambos casos → "" se convierte en true, boolean pasa directo.
+  // Alternativa más concisa: input(false, { transform: booleanAttribute }) de @angular/core
   isCommand = input(false, {
     transform: (value: boolean | string) => (typeof value === 'string' ? value === '' : value),
   });
