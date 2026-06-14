@@ -1328,6 +1328,123 @@ String(-0)       → "0"
 └───────────────────────────────────┴──────────────────────────────────────────┘
 ```
 
+### Tests de componente con dependencias (`calculator-view.component.spec.ts`)
+
+Cuando un componente tiene hijos con lógica compleja o dependencias externas, se usa el patrón **mock + overrideComponent** para aislarlo y testar solo su comportamiento propio.
+
+#### Patrón mock de componente hijo
+
+Se define un componente mínimo con el **mismo selector** que el hijo real. Angular lo renderizará en su lugar durante el test:
+
+```typescript
+// MockCalculatorComponent reemplaza al CalculatorComponent real durante el test.
+// Propósito: aislar CalculatorViewComponent de la lógica y dependencias de su hijo.
+// Mismo selector ('calculator') → Angular lo renderiza en lugar del componente real.
+@Component({
+  selector: 'calculator',
+  template: '<div>Mock Calculator</div>',
+})
+class MockCalculatorComponent {}
+```
+
+**Convención de nombre:** `Mock` + nombre del componente que se reemplaza (`MockCalculatorComponent`, no `MockCalculatorViewComponent`). El nombre del mock describe qué simula, no en qué test se usa.
+
+#### `overrideComponent` — reemplazar dependencias en tiempo de test
+
+Angular compila los templates de componentes standalone con sus `imports[]` declarados. Para sustituir uno de esos imports en el test se usa `overrideComponent`:
+
+```typescript
+TestBed.configureTestingModule({
+  imports: [CalculatorViewComponent],    // registra el componente bajo prueba
+}).overrideComponent(CalculatorViewComponent, {
+  set: {
+    imports: [MockCalculatorComponent],  // reemplaza CalculatorComponent por el mock
+  }
+});
+```
+
+```
+Sin overrideComponent:
+  CalculatorViewComponent
+    └── CalculatorComponent (real → carga CalculatorService, signals, teclado...)
+
+Con overrideComponent:
+  CalculatorViewComponent
+    └── MockCalculatorComponent (mock → solo renderiza <div>Mock Calculator</div>)
+```
+
+Esto hace que el test de `CalculatorViewComponent` solo verifique su propia estructura (el `<div>` wrapper y sus clases), sin depender del estado ni de los errores del componente hijo.
+
+#### `fixture.detectChanges()` — primer ciclo de rendering
+
+A diferencia del test de servicios, los tests de componentes **sí necesitan** `detectChanges()`:
+
+```typescript
+fixture = TestBed.createComponent(CalculatorViewComponent);
+component = fixture.componentInstance;
+// Dispara el primer ciclo de detección de cambios: ejecuta ngOnInit y
+// sincroniza el template con el estado inicial del componente.
+fixture.detectChanges();
+```
+
+Sin `detectChanges()`, el DOM del componente no tiene contenido — el template no se ha evaluado todavía.
+
+#### Suite completa
+
+```typescript
+describe('CalculatorViewComponent', () => {
+  let component: CalculatorViewComponent;
+  let fixture: ComponentFixture<CalculatorViewComponent>;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [CalculatorViewComponent],
+    }).overrideComponent(CalculatorViewComponent, {
+      set: { imports: [MockCalculatorComponent] }
+    });
+    fixture = TestBed.createComponent(CalculatorViewComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+  });
+
+  // 1. Creación — el componente instancia sin errores.
+  it('should create', () => {
+    expect(component).toBeTruthy();
+  });
+
+  // 2. Presencia del hijo en el DOM — el selector 'calculator' existe.
+  it('should render calculator component', () => {
+    const calculatorComponent = fixture.nativeElement.querySelector('calculator');
+    expect(calculatorComponent).toBeTruthy();
+  });
+
+  // 3. Clases CSS robustas — classList.contains() resiste cambios de orden.
+  it('should contain specific css classes', () => {
+    const mustHaveClasses = 'w-full mx-auto rounded-xl bg-gray-100 shadow-xl text-gray-800 relative overflow-hidden'.split(' ');
+    const div = (fixture.nativeElement as HTMLElement).querySelector('div');
+    mustHaveClasses.forEach(cls => {
+      expect(div?.classList.contains(cls)).toBe(true);
+    });
+  });
+});
+```
+
+#### Resumen: componente simple vs componente con hijos
+
+```
+┌──────────────────────────────┬──────────────────────────────────────────────┐
+│ Sin hijos complejos          │ Con hijos complejos                          │
+├──────────────────────────────┼──────────────────────────────────────────────┤
+│ imports: [MiComponente]      │ imports: [MiComponente]                      │
+│ (sin overrideComponent)      │ + overrideComponent(..., { set: { imports }})│
+│                              │                                              │
+│ Todos los hijos se renderizan│ Los hijos se reemplazan por mocks            │
+│ con su lógica real           │ con templates mínimos                        │
+└──────────────────────────────┴──────────────────────────────────────────────┘
+```
+
+---
+
 ### Tests del proyecto (`app.spec.ts`)
 
 Los tests del componente raíz `App` cubren cuatro patrones distintos de verificación.
