@@ -69,8 +69,12 @@ npm start          # ng serve → http://localhost:4200
 npm run build      # ng build → dist/
 
 # Tests
-npm test           # vitest
+npm test           # vitest — ejecuta los tests una vez
+ng test --coverage # genera reporte de cobertura en coverage/zoneless-calculator/
 ```
+
+> El reporte HTML se abre en `coverage/zoneless-calculator/index.html`.
+> Para la teoría completa sobre cobertura de código ver la **[Guía de Estudio](./angular-study-guide-es.md)**.
 
 ---
 

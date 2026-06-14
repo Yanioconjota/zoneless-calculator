@@ -1553,4 +1553,101 @@ it('it should render buy me a beer link with attributes', () => {
 
 ---
 
+## Code Coverage
+
+### ¿Qué es el code coverage?
+
+El **code coverage** (cobertura de código) es una métrica que indica qué porcentaje del código fuente fue ejecutado durante los tests. Se mide en distintas dimensiones:
+
+```
+┌──────────────────────┬──────────────────────────────────────────────────────┐
+│ Métrica              │ Qué mide                                             │
+├──────────────────────┼──────────────────────────────────────────────────────┤
+│ Statements           │ Sentencias individuales ejecutadas                   │
+│ Branches             │ Ramas de if/else/switch cubiertas                    │
+│ Functions            │ Funciones/métodos invocados                          │
+│ Lines                │ Líneas de código alcanzadas                          │
+└──────────────────────┴──────────────────────────────────────────────────────┘
+```
+
+### Cómo generar el reporte
+
+El proyecto usa `@vitest/coverage-v8`. El comando es:
+
+```bash
+ng test --coverage
+```
+
+El reporte HTML se genera en `coverage/zoneless-calculator/index.html`. Se puede abrir en cualquier navegador y muestra archivo por archivo qué líneas están cubiertas (verde) y cuáles no (rojo/amarillo).
+
+### Coverage alto ≠ buenas pruebas
+
+Este es el error más común al interpretar la métrica. Un 100% de cobertura solo garantiza que el código fue **ejecutado** — no que el comportamiento fue **verificado**.
+
+```typescript
+// Este test da 100% de coverage en la función...
+it('cubre la línea', () => {
+  service.constructNumber('5');
+  // ...pero no tiene ningún expect — no verifica nada
+});
+```
+
+La cobertura responde **¿qué código se ejecutó?**, no **¿se comporta correctamente?**
+
+```
+Coverage alto con malos tests:
+  ✔ 100% lines covered
+  ✘ No verifica el resultado de la suma
+  ✘ No verifica el manejo de división por cero
+  ✘ No verifica que el límite de caracteres funciona
+
+Coverage 70% con buenos tests:
+  ✔ Verifica todos los flujos críticos
+  ✔ Verifica edge cases con expects precisos
+  ✔ Detecta regresiones reales
+```
+
+### La ruta crítica — qué sí importa cubrir
+
+La **ruta crítica** es el conjunto de funcionalidades cuyo fallo tiene mayor impacto en el usuario o en el negocio. Cubrir la ruta crítica con tests sólidos es más valioso que perseguir un porcentaje alto en código auxiliar.
+
+En este proyecto la ruta crítica es:
+
+```
+CalculatorService.constructNumber()
+  │
+  ├── Entrada de números          → resultText se actualiza correctamente
+  ├── Selección de operador       → lastOperator y subResultText se actualizan
+  ├── Cálculo con '='             → resultado aritmético correcto
+  ├── Borrado con 'C'             → reset completo del estado
+  ├── Backspace                   → elimina último carácter sin romper signo
+  ├── Punto decimal               → solo un punto por número
+  ├── Cambio de signo '+/-'       → invierte el signo correctamente
+  └── Validaciones                → max length e input inválido son ignorados
+```
+
+El código periférico (estilos, templates de views sin lógica, mocks) tiene menos prioridad. Un archivo como `calculator-view.component.ts` tiene 0 lógica propia — su test verifica estructura, no comportamiento.
+
+### Criterio práctico
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Pregunta guía al escribir un test:                                  │
+│                                                                      │
+│  "Si este código falla en producción, ¿el test lo detectaría?"       │
+│                                                                      │
+│  Si la respuesta es NO → el test no aporta valor real,               │
+│  aunque sume al porcentaje de coverage.                              │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+Recomendaciones:
+
+- Apuntar a **80–90%** en la ruta crítica con expectations precisos.
+- Ignorar líneas de cobertura en código generado, interfaces y re-exports.
+- Preferir tests que **fallarían** si se rompe la lógica real.
+- Un test sin `expect()` (o con `expect(true).toBe(true)`) no es un test — es ruido.
+
+---
+
 *Guía generada con el código real del proyecto `01-zoneless-calculator`. Angular 22.0.0.*
