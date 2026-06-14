@@ -21,13 +21,16 @@ export class CalculatorComponent {
   }
 
   handleKeyboardEvent(event: KeyboardEvent) {
+    console.log(event);
     const key = event.key.trim();
     const equivalentKey: Record<string, string> = {
       Escape: 'C',
       Clear: 'C',
       Enter: '=',
       'x': '*',
+      'X': '*',
       '÷': '/',
+      '*': '*',
     }
     const keyValue = equivalentKey[key] ?? key;
     this.handleClick(keyValue);

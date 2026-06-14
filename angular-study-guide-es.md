@@ -1379,6 +1379,114 @@ String(-0)       → "0"
 └───────────────────────────────────┴──────────────────────────────────────────┘
 ```
 
+### Tests de componente con `host` (`calculator-button.component.spec.ts`)
+
+`CalculatorButtonComponent` aplica sus clases CSS directamente al elemento raíz usando la propiedad `host` del decorador — no al `<button>` interno del template. Esto cambia dónde se buscan las clases en el test.
+
+#### `fixture.nativeElement` apunta al host, no al template
+
+```
+fixture.nativeElement
+        │
+        └── <calculator-button class="border-r border-b w-1/4">  ← HOST (clases de `host: {}`)
+                  └── <button class="is-command is-pressed">      ← TEMPLATE interno
+                          └── <ng-content />
+```
+
+Para verificar clases declaradas en `host: { ... }`, se lee `fixture.nativeElement` directamente. Para verificar clases del template interno, se usaría `fixture.nativeElement.querySelector('button')`.
+
+#### `let` vs `const` — ciclos de vida distintos
+
+```typescript
+describe('CalculatorButtonComponent', () => {
+  // let: scope del describe → asignados en beforeEach, accesibles en todos los it()
+  let fixture: ComponentFixture<CalculatorButtonComponent>;
+  let component: CalculatorButtonComponent;
+
+  beforeEach(() => {
+    fixture = TestBed.createComponent(...); // se (re)asigna antes de cada test
+  });
+
+  it('test 1', () => {
+    const hostElement = fixture.nativeElement; // const: scope local del it()
+    // hostElement solo existe dentro de este bloque
+  });
+
+  it('test 2', () => {
+    const hostElement = fixture.nativeElement; // nueva const, independiente
+  });
+});
+```
+
+`fixture` se comparte porque `beforeEach` y los `it()` necesitan coordinarse. Las `const` locales son efímeras — se crean y destruyen con cada test.
+
+#### `fixture.componentRef.setInput()` — cambiar inputs en tiempo de test
+
+Para testear que el componente responde a distintos valores de un input signal, se usa `setInput`:
+
+```typescript
+it('should apply w-2/4 when isDoubleSize is true', () => {
+  // Act: setInput ANTES de leer el DOM — detectChanges re-evalúa el host con el nuevo valor.
+  fixture.componentRef.setInput('isDoubleSize', true);
+  fixture.detectChanges(); // re-evalúa host: { '[class.w-2/4]': 'isDoubleSize()' }
+
+  // Assert: el host ahora tiene 'w-2/4' en lugar de 'w-1/4'
+  const hostElement = fixture.nativeElement as HTMLElement;
+  expect(hostElement.classList.value).toContain('w-2/4');
+});
+```
+
+El orden importa: si `const hostElement` se pusiera antes de `setInput`, capturaría el DOM con el estado anterior y el test fallaría aunque la lógica sea correcta.
+
+```
+Orden CORRECTO:
+  1. setInput('isDoubleSize', true)  ← modifica el signal
+  2. detectChanges()                 ← Angular re-evalúa el host
+  3. const hostElement = ...         ← captura el DOM actualizado
+  4. expect(...)                     ← verifica ✔
+
+Orden INCORRECTO:
+  1. const hostElement = ...         ← captura DOM con isDoubleSize=false
+  2. setInput('isDoubleSize', true)
+  3. detectChanges()
+  4. expect(hostElement.classList...) ← sigue viendo el DOM viejo ✘
+```
+
+#### Suite completa
+
+```typescript
+describe('CalculatorButtonComponent', () => {
+  let component: CalculatorButtonComponent;
+  let fixture: ComponentFixture<CalculatorButtonComponent>;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [CalculatorButtonComponent] });
+    fixture = TestBed.createComponent(CalculatorButtonComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+  });
+
+  it('should create', () => {
+    expect(component).toBeTruthy();
+  });
+
+  it('should apply w-1/4 when isDoubleSize is false (default)', () => {
+    // beforeEach ya crea el componente con isDoubleSize=false
+    const hostElement = fixture.nativeElement as HTMLElement;
+    expect(hostElement.classList.value).toContain('w-1/4');
+  });
+
+  it('should apply w-2/4 when isDoubleSize is true', () => {
+    fixture.componentRef.setInput('isDoubleSize', true);
+    fixture.detectChanges();
+    const hostElement = fixture.nativeElement as HTMLElement;
+    expect(hostElement.classList.value).toContain('w-2/4');
+  });
+});
+```
+
+---
+
 ### Tests de componente con dependencias (`calculator-view.component.spec.ts`)
 
 Cuando un componente tiene hijos con lógica compleja o dependencias externas, se usa el patrón **mock + overrideComponent** para aislarlo y testar solo su comportamiento propio.

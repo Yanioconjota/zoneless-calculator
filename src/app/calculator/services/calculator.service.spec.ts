@@ -56,7 +56,7 @@ describe('CalculatorService', () => {
   });
 
   it('should handle operators correctly', () => {
-    const operators = ['+', '-', '*', '/'];
+    const operators = ['+', '-', '*', '/', 'x', 'X', '÷'];
 
     // Usamos forEach para probar el mismo comportamiento con cada operador
     // sin duplicar el test cuatro veces. Cada iteración es un AAA completo.

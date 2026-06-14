@@ -9,6 +9,7 @@ import { Component, ElementRef, input, output, signal, viewChild } from '@angula
     class: 'border-r border-b border-indigo-400',
     '[class.w-2/4]': 'isDoubleSize()',
     '[class.w-1/4]': '!isDoubleSize()',
+    '[class.is-command]': 'isCommand()',
   },
 })
 export class CalculatorButtonComponent {
