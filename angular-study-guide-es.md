@@ -1673,6 +1673,139 @@ Con TestHostComponent:
 
 ---
 
+### Tests de componente con servicio mockeado (`calculator.component.spec.ts`)
+
+`CalculatorComponent` depende de `CalculatorService` inyectado. Para testar el componente en aislamiento se reemplaza el servicio real con un **mock class** usando el patrón `useValue` en `providers`.
+
+#### Patrón `MockService` con `useValue`
+
+Se define una clase con la misma interfaz pública que el servicio real. Las signals son instancias reales (para que los `computed()` del componente funcionen); los métodos son `vi.fn()`:
+
+```typescript
+// signals reales → los computed() del componente pueden derivar de ellas
+// vi.fn() → registra llamadas sin ejecutar lógica real
+class MockCalculatorService {
+  resultText    = signal('100');
+  subResultText = signal('20');
+  lastOperator  = signal('-');
+  constructNumber = vi.fn();
+}
+```
+
+Se inyecta con `useValue` en el `providers` del `TestBed`:
+
+```typescript
+beforeEach(() => {
+  mockCalculatorService = new MockCalculatorService();
+
+  TestBed.configureTestingModule({
+    imports: [CalculatorComponent],
+    providers: [
+      { provide: CalculatorService, useValue: mockCalculatorService }, // sustituye el real
+    ],
+  });
+});
+```
+
+```
+Sin useValue:   Angular inyecta CalculatorService real → carga estado real, efectos reales
+Con useValue:   Angular inyecta mockCalculatorService  → estado controlado, sin efectos
+```
+
+**`vi.fn()` vs signal real:**
+- Las signals del mock son reales porque `computed()` en el componente las observa directamente. Si fueran valores planos no actualizarían el template.
+- `constructNumber` es `vi.fn()` porque no necesitamos que ejecute lógica — solo verificar que fue llamado con el argumento correcto.
+
+#### Verificar que `computed()` refleja cambios del mock
+
+Modificar la signal del mock y llamar `detectChanges()` propaga el nuevo valor al DOM:
+
+```typescript
+it('should display values in the template', () => {
+  mockCalculatorService.resultText.set('1000');
+  mockCalculatorService.lastOperator.set('*');
+  fixture.detectChanges(); // propaga los nuevos valores de signals al DOM
+
+  expect(fixture.nativeElement.querySelector('#result-text').textContent).toBe('1000');
+  expect(fixture.nativeElement.querySelector('#sub-result-text').textContent).toBe('200 *');
+});
+```
+
+#### Testear el handler de teclado del `host`
+
+El `host: { '(document:keyup)': 'handleKeyboardEvent($event)' }` asocia el evento al método. En el test se llama directamente al método pasándole un `KeyboardEvent` construido manualmente:
+
+```typescript
+it('should handle keyboard events correctly', () => {
+  // KeyboardEvent manual — simula lo que el host binding dispararía en el browser
+  component.handleKeyboardEvent(new KeyboardEvent('keyup', { key: '1' }));
+  expect(mockCalculatorService.constructNumber).toHaveBeenCalledWith('1');
+});
+
+it('should handle special keyboard events (Enter -> =)', () => {
+  // equivalentKey mapea Enter → '=' antes de delegar a constructNumber
+  component.handleKeyboardEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
+  expect(mockCalculatorService.constructNumber).toHaveBeenCalledWith('=');
+});
+```
+
+#### `By.directive()` + `triggerEventHandler()` — interactuar con componentes hijos
+
+`fixture.debugElement.queryAll(By.directive(X))` busca por clase de componente/directiva, no por selector CSS. Es más robusto porque no rompe si cambia el nombre del selector:
+
+```typescript
+// By.directive busca instancias del componente en el árbol de Angular
+const buttons = fixture.debugElement.queryAll(By.directive(CalculatorButtonComponent));
+
+// triggerEventHandler dispara el output (onClick) en el contexto de Angular,
+// equivale a que el hijo emita el evento en el template real
+buttons[0].triggerEventHandler('onClick', 'C');
+expect(mockCalculatorService.constructNumber).toHaveBeenCalledWith('C');
+```
+
+```
+fixture.nativeElement.querySelectorAll('calculator-button')  → DOM query, devuelve HTMLElement[]
+fixture.debugElement.queryAll(By.directive(...))             → Angular query, devuelve DebugElement[]
+```
+
+`DebugElement` permite usar `triggerEventHandler` para disparar outputs de Angular. `HTMLElement` no tiene ese método — solo puede disparar eventos DOM nativos.
+
+#### Test de estructura — contar y verificar botones
+
+Verifica que el template renderiza todos los botones con su contenido proyectado:
+
+```typescript
+it('should have 19 calculator-button components with content projected', () => {
+  const buttons = fixture.nativeElement.querySelectorAll('calculator-button');
+  expect(buttons.length).toBe(19);
+
+  // verificación explícita de los primeros botones
+  expect(buttons[0].textContent).toBe('C');
+  expect(buttons[3].textContent).toBe('÷');
+
+  // todos los botones deben tener contenido proyectado no vacío
+  buttons.forEach((button: HTMLButtonElement) => {
+    expect(button.textContent?.trim()).toBeTruthy();
+  });
+});
+```
+
+#### Resumen: estrategias de mock en componentes
+
+```
+┌──────────────────────────┬────────────────────────────────────────────────────────┐
+│ Estrategia               │ Cuándo usarla                                          │
+├──────────────────────────┼────────────────────────────────────────────────────────┤
+│ useValue + MockClass      │ Servicio con signals que computed() observa           │
+│ overrideComponent        │ Componente hijo con lógica compleja o dependencias     │
+│ TestHostComponent        │ ng-content requiere un padre para proyectar contenido  │
+│ vi.fn() en método        │ Solo necesito verificar que fue llamado (no su lógica) │
+│ signal() real en mock    │ computed() del componente necesita observar cambios    │
+└──────────────────────────┴────────────────────────────────────────────────────────┘
+```
+
+---
+
 ### Tests de componente con dependencias (`calculator-view.component.spec.ts`)
 
 Cuando un componente tiene hijos con lógica compleja o dependencias externas, se usa el patrón **mock + overrideComponent** para aislarlo y testar solo su comportamiento propio.

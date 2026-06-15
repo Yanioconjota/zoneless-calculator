@@ -4,10 +4,10 @@
 >
   <div class="w-full py-5 px-6 text-6xl text-white font-thin">
     @if(subResultText() !== '0') {
-      <span class="text-4xl">{{ subResultText() }} {{ lastOperator() }}</span>
+      <span id="sub-result-text" class="text-4xl">{{ subResultText() }} {{ lastOperator() }}</span>
       <br>
     }
-    <span>{{ resultText() }}</span>
+    <span id="result-text">{{ resultText() }}</span>
 
   </div>
 </div>
