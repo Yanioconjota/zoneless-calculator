@@ -1,5 +1,16 @@
 import { ComponentFixture, TestBed } from "@angular/core/testing";
 import { CalculatorButtonComponent } from "./calculator-button.component";
+import { Component } from "@angular/core";
+
+@Component({
+  imports: [CalculatorButtonComponent],
+  template: `
+  <calculator-button>
+    <span class="projected-content">7</span>
+  </calculator-button>
+  `,
+})
+class TestHostComponent {}
 
 // fixture.nativeElement → host <calculator-button> (clases de `host: {}`)
 // querySelector('button') → <button> interno del template (otros bindings)
@@ -55,15 +66,31 @@ describe('CalculatorButtonComponent', () => {
     expect(spy).toHaveBeenCalledWith('7');
   });
 
-  it('should set isPressed to true and then false when keyboardPressedStyle is called with matching key', (done) => {
-    // todo:
+  it('should set isPressed to true and then false when keyboardPressedStyle is called with matching key', async () => {
+    // contentValue() es el viewChild signal — da acceso directo al <button> nativo del template
+    component.contentValue()!.nativeElement.textContent = '7';
+    component.keyboardPressedStyle('7');
+    expect(component.isPressed()).toBe(true);
+
+    // keyboardPressedStyle usa setTimeout(100ms) para resetear isPressed → esperamos 101ms
+    await new Promise(resolve => setTimeout(resolve, 101));
+    expect(component.isPressed()).toBe(false);
   });
 
   it('should NOT set isPressed if key does not match', () => {
-    // todo:
+    // el botón muestra '7' pero se presiona '8' → isPressed no debe activarse
+    component.contentValue()!.nativeElement.textContent = '7';
+    component.keyboardPressedStyle('8');
+    expect(component.isPressed()).toBe(false);
   });
 
   it('should display projected content', () => {
-    // todo:
+    // ng-content requiere un componente padre para proyectar contenido →
+    // TestHostComponent provee el contexto de proyección que el test aislado no puede dar
+    const fixtureHost = TestBed.createComponent(TestHostComponent);
+    fixtureHost.detectChanges();
+    const hostElement = fixtureHost.nativeElement as HTMLElement;
+    expect(hostElement.querySelector('.projected-content')?.textContent).toBeTruthy();
+    expect(hostElement.querySelector('.projected-content')?.textContent).toBe('7');
   });
 });

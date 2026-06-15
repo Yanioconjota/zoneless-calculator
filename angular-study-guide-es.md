@@ -1561,18 +1561,114 @@ describe('CalculatorButtonComponent', () => {
 });
 ```
 
+#### Test de signal asíncrono — `viewChild` + `setTimeout`
+
+Algunos métodos modifican un signal y luego lo revierten después de un delay con `setTimeout`. Para testear el estado final se necesita un test `async` que espere ese tiempo:
+
+```typescript
+it('should set isPressed to true and then false...', async () => {
+  // contentValue() es el viewChild signal → da acceso directo al <button> nativo
+  component.contentValue()!.nativeElement.textContent = '7';
+  component.keyboardPressedStyle('7');
+
+  expect(component.isPressed()).toBe(true); // inmediatamente después: true
+
+  // keyboardPressedStyle usa setTimeout(100ms) internamente → esperamos 101ms
+  await new Promise(resolve => setTimeout(resolve, 101));
+
+  expect(component.isPressed()).toBe(false); // tras el timeout: reseteado a false
+});
+```
+
+**`component.contentValue()`** — acceso directo al `viewChild` signal del componente. Es una alternativa a `querySelector` cuando necesitamos el `ElementRef` tipado que el componente ya expone internamente, no solo el elemento HTML.
+
+**Patrón `async/await` vs `done`:** en Vitest, un test asíncrono debe usar **uno de los dos**, nunca ambos:
+
+```typescript
+// ✔ async/await — el runner espera a que el Promise se resuelva
+it('...', async () => {
+  await new Promise(resolve => setTimeout(resolve, 101));
+  expect(...);
+});
+
+// ✔ done — el runner espera a que se llame done()
+it('...', (done) => {
+  setTimeout(() => {
+    expect(...);
+    done(); // ← obligatorio llamarlo
+  }, 101);
+});
+
+// ✘ mezclar ambos — done nunca se llama → el test puede agotar el timeout
+it('...', async (done) => { ... });
+```
+
+#### Test negativo — verificar que algo NO ocurre
+
+Los tests negativos verifican que el sistema respeta sus guardas. Son tan importantes como los tests positivos:
+
+```typescript
+it('should NOT set isPressed if key does not match', () => {
+  // el botón muestra '7' pero se presiona '8' → isPressed no debe activarse
+  component.contentValue()!.nativeElement.textContent = '7';
+  component.keyboardPressedStyle('8');
+
+  expect(component.isPressed()).toBe(false);
+});
+```
+
+#### Test de `ng-content` — proyección con `TestHostComponent`
+
+`<ng-content />` no puede testearse en un fixture aislado porque requiere un componente padre que proyecte el contenido. La solución es un `TestHostComponent` que envuelve al componente bajo prueba:
+
+```typescript
+@Component({
+  imports: [CalculatorButtonComponent],
+  template: `
+    <calculator-button>
+      <span class="projected-content">7</span>
+    </calculator-button>
+  `,
+})
+class TestHostComponent {}
+
+it('should display projected content', () => {
+  // Se crea el fixture del HOST, no del componente bajo prueba
+  const fixtureHost = TestBed.createComponent(TestHostComponent);
+  fixtureHost.detectChanges();
+
+  const hostElement = fixtureHost.nativeElement as HTMLElement;
+  expect(hostElement.querySelector('.projected-content')?.textContent).toBe('7');
+});
+```
+
+```
+Sin TestHostComponent:
+  fixture = createComponent(CalculatorButtonComponent)
+  → <calculator-button></calculator-button>   ← sin contenido proyectado
+
+Con TestHostComponent:
+  fixture = createComponent(TestHostComponent)
+  → <calculator-button>
+       <span class="projected-content">7</span>   ← contenido proyectado ✔
+     </calculator-button>
+```
+
 #### Resumen de tipos de test en componentes
 
 ```
-┌────────────────────────┬────────────────────────────────────┬──────────────────────────────────┐
-│ Tipo                   │ Qué verifica                       │ Dónde buscar en el DOM           │
-├────────────────────────┼────────────────────────────────────┼──────────────────────────────────┤
-│ Creación               │ El componente instancia sin error  │ component (instancia)            │
-│ Host binding           │ Clase/atrib en el elemento raíz    │ fixture.nativeElement            │
-│ Template binding       │ Clase/atrib en elemento del tmpl   │ .querySelector('selector')       │
-│ Output / emit          │ El evento se emite con valor correcto│ vi.spyOn(component.output,'emit')│
-│ Input + detectChanges  │ El componente reacciona al input   │ setInput() + detectChanges()     │
-└────────────────────────┴────────────────────────────────────┴──────────────────────────────────┘
+┌─────────────────────────┬─────────────────────────────────────┬────────────────────────────────────┐
+│ Tipo                    │ Qué verifica                        │ Cómo                               │
+├─────────────────────────┼─────────────────────────────────────┼────────────────────────────────────┤
+│ Creación                │ El componente instancia sin error   │ expect(component).toBeTruthy()     │
+│ Host binding            │ Clase en el elemento raíz           │ fixture.nativeElement.classList    │
+│ Template binding        │ Clase en elemento del template      │ querySelector('sel').classList     │
+│ Output / emit           │ El output emite con valor correcto  │ vi.spyOn(component.out, 'emit')    │
+│ Input + detectChanges   │ El componente reacciona al input    │ setInput() + detectChanges()       │
+│ Signal asíncrono        │ Estado que cambia tras un delay     │ async + await new Promise(...)     │
+│ Test negativo           │ Que algo NO ocurre                  │ expect(signal()).toBe(valorInicial) │
+│ ng-content / proyección │ Contenido proyectado desde el padre │ TestHostComponent + createComponent│
+└─────────────────────────┴─────────────────────────────────────┴────────────────────────────────────┘
 ```
 
 ---
